@@ -1,0 +1,6 @@
+{
+  "name": "settings",
+  "version": "1.1.0",
+  "entry": "module.py:SettingsModule",
+  "depends_on": []
+}

@@ -1,0 +1,6 @@
+{
+  "name": "viewer3d",
+  "version": "1.0.0",
+  "entry": "module.py:Viewer3DModule",
+  "depends_on": []
+}

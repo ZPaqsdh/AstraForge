@@ -1,0 +1,763 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>AstraForge 星铸 · 安装器 UI 模板 v3（真实流程）</title>
+<style>
+  :root{
+    --bg:#eef1f5; --win:#ffffff; --fg:#1b1b1b; --muted:#5f6b7a; --dim:#93a0b0;
+    --accent:#005fb8; --accent2:#0a84ff; --border:#dbe2ea; --ok:#0f7b0f; --warn:#9d5d00;
+    --err:#b3261e; --brand1:#06263f; --brand2:#0a3d63;
+  }
+  *{margin:0;padding:0;box-sizing:border-box}
+  body{
+    background:linear-gradient(135deg,#dde5ee,#eef1f5 40%,#e6ecf3);
+    min-height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;
+    font-family:"Segoe UI","Microsoft YaHei UI","Microsoft YaHei",system-ui,sans-serif;color:var(--fg);
+    padding:26px 16px;gap:12px;
+  }
+  .page-note{font-size:12.5px;color:#5b6b7d;text-align:center;line-height:1.8;max-width:860px}
+  .page-note b{color:#1b3b5c}
+  .installer{
+    width:780px;background:var(--win);border-radius:12px;overflow:hidden;position:relative;
+    box-shadow:0 24px 60px rgba(16,32,56,.22),0 2px 8px rgba(16,32,56,.10);
+    display:flex;flex-direction:column;
+  }
+  /* 标题栏（含最小化） */
+  .titlebar{height:38px;display:flex;align-items:center;justify-content:space-between;
+    padding:0 8px 0 14px;background:var(--brand1);color:#cfe3f5;font-size:12px}
+  .titlebar .t{display:flex;align-items:center;gap:8px;letter-spacing:.3px}
+  .titlebar .dot{width:14px;height:14px;border-radius:4px;background:linear-gradient(135deg,var(--accent2),#7cc4ff)}
+  .titlebar .wbtns{display:flex;gap:2px}
+  .titlebar .wb{width:30px;height:24px;display:flex;align-items:center;justify-content:center;
+    border-radius:5px;cursor:pointer;opacity:.85;font-size:12px}
+  .titlebar .wb:hover{background:rgba(255,255,255,.14);opacity:1}
+  .titlebar .wb.close:hover{background:#c93b3b;color:#fff}
+  /* 品牌横幅 */
+  .brand{position:relative;height:150px;flex-shrink:0;background:
+      radial-gradient(120% 160% at 12% -20%,#0d5a8f 0%,transparent 55%),
+      linear-gradient(115deg,var(--brand1) 0%,var(--brand2) 55%,#0e4f7d 100%);overflow:hidden}
+  .brand svg.arc{position:absolute;right:-40px;top:-70px;width:300px;height:300px;opacity:.5}
+  .brand .inner{position:absolute;left:28px;bottom:18px;display:flex;align-items:center;gap:15px}
+  .brand .mark{width:58px;height:58px;border-radius:15px;background:rgba(255,255,255,.10);
+    border:1px solid rgba(255,255,255,.22);display:flex;align-items:center;justify-content:center}
+  .brand .name{font-size:24px;font-weight:700;color:#fff;letter-spacing:.5px;line-height:1.15}
+  .brand .sub{font-size:12px;color:#9fc6e6;margin-top:4px;letter-spacing:.4px}
+  .brand .ver{position:absolute;right:18px;bottom:18px;font-size:11.5px;color:#8fb8da;
+    border:1px solid rgba(255,255,255,.22);border-radius:9px;padding:2px 9px}
+  /* 内容区 */
+  main{flex:1;min-height:296px;padding:18px 28px 10px;position:relative}
+  section{display:none}
+  section.active{display:block}
+  .h{font-size:14.5px;font-weight:600;margin-bottom:9px}
+  .h .sm{font-weight:400;color:var(--muted);font-size:12px;margin-left:8px}
+  /* 路径行 */
+  .pathrow{display:flex;align-items:center;gap:8px;background:#f6f8fa;border:1px solid var(--border);
+    border-radius:9px;padding:8px 11px;font-size:12.5px}
+  .pathrow .p{flex:1;font-family:Consolas,monospace;color:#243447;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .pathrow .size{color:var(--dim);font-size:11.5px;white-space:nowrap;margin-right:10px}
+  .mini{font-size:12px;color:var(--accent);cursor:pointer;white-space:nowrap}
+  .mini:hover{text-decoration:underline}
+  /* 检测条 */
+  .checkbar{display:flex;align-items:center;gap:8px;margin-top:10px;font-size:12.5px;
+    background:#f0f7f0;border:1px solid #cfe6cf;color:#1c5c1c;border-radius:9px;padding:7px 11px}
+  .checkbar.low{background:#fff7ec;border-color:#f0d9b5;color:#8a5200}
+  .checkbar.warn{background:#fdf2f1;border-color:#f0cfcb;color:var(--err)}
+  /* 选项 */
+  .opts{margin-top:12px;display:flex;flex-direction:column;gap:8px;font-size:13px}
+  label.chk{display:flex;align-items:center;gap:9px;cursor:pointer;user-select:none}
+  label.chk input{width:15px;height:15px;accent-color:var(--accent);cursor:pointer}
+  label.chk.dis{opacity:.6;cursor:default}
+  .lic-row{margin-top:13px;display:flex;align-items:center;gap:9px;font-size:13px;
+    padding-top:11px;border-top:1px solid var(--border)}
+  .lic-row .lk{color:var(--accent);cursor:pointer}
+  .lic-row .lk:hover{text-decoration:underline}
+  /* 卡片块 */
+  .block{background:#f8fafc;border:1px solid var(--border);border-radius:9px;padding:11px 14px;margin-top:11px}
+  .block .bt{font-size:12.5px;font-weight:600;color:#33475c;margin-bottom:8px}
+  .block .row{display:flex;gap:18px;flex-wrap:wrap}
+  /* 协议 */
+  .licbox{border:1px solid var(--border);border-radius:9px;background:#fbfcfd;
+    height:180px;overflow-y:auto;padding:13px 16px;font-size:12.5px;line-height:1.9;color:#2b3a4a}
+  .licbox h4{font-size:13px;margin:12px 0 4px;color:#16283a}
+  .licbox h4:first-child{margin-top:0}
+  .licfoot{display:flex;align-items:center;justify-content:space-between;margin-top:9px;font-size:12px;color:var(--dim)}
+  .scrollhint{color:var(--warn)}
+  /* 已安装检测 */
+  .existwrap{display:flex;flex-direction:column;align-items:center;gap:12px;padding-top:12px;text-align:center}
+  .existico{width:58px;height:58px;border-radius:50%;background:#eef4fb;display:flex;align-items:center;justify-content:center}
+  .existt{font-size:16px;font-weight:700}
+  .exists{font-size:12.5px;color:var(--muted)}
+  .existopts{display:flex;gap:12px;margin-top:6px}
+  .optcard{border:1px solid var(--border);border-radius:10px;padding:12px 20px;cursor:pointer;
+    background:#fff;text-align:center;min-width:150px;transition:all .15s}
+  .optcard:hover{border-color:var(--accent);box-shadow:0 4px 14px rgba(0,95,184,.12)}
+  .optcard .ot{font-size:13.5px;font-weight:600}
+  .optcard .od{font-size:11.5px;color:var(--muted);margin-top:3px}
+  /* 卸载清单 */
+  .ulist{background:#f8fafc;border:1px solid var(--border);border-radius:9px;padding:11px 16px;font-size:12.5px;line-height:2}
+  .ulist .k{color:var(--muted)}
+  /* 安装/卸载进度 */
+  .instwrap{display:flex;flex-direction:column;justify-content:center;height:250px;gap:15px}
+  .pct{font-size:34px;font-weight:700;color:var(--accent);font-variant-numeric:tabular-nums}
+  .pct span{font-size:15px;color:var(--muted);font-weight:400;margin-left:6px}
+  .bar{height:10px;border-radius:9px;background:#e7edf3;overflow:hidden}
+  .bar>div{height:100%;width:0%;border-radius:9px;
+    background:linear-gradient(90deg,var(--accent),var(--accent2))}
+  .bar.red>div{background:linear-gradient(90deg,#d7503f,#e2725f)}
+  .stage{font-size:13px;color:var(--muted)}
+  .tip{font-size:11.5px;color:var(--dim)}
+  /* 错误页 */
+  .errwrap{display:flex;flex-direction:column;align-items:center;justify-content:center;height:250px;gap:12px;text-align:center}
+  .errico{width:58px;height:58px;border-radius:50%;background:#fdeceb;display:flex;align-items:center;justify-content:center}
+  .errt{font-size:17px;font-weight:700;color:var(--err)}
+  .errs{font-size:12.5px;color:var(--muted);line-height:1.9;max-width:520px}
+  .errdetail{font-family:Consolas,monospace;font-size:11.5px;background:#f8fafc;border:1px solid var(--border);
+    border-radius:9px;padding:9px 13px;color:#536171;text-align:left;max-width:560px;word-break:break-all}
+  /* 完成页 */
+  .donewrap{display:flex;flex-direction:column;align-items:center;justify-content:center;height:256px;gap:11px;text-align:center}
+  .doneico{width:62px;height:62px;border-radius:50%;background:#e8f6ea;display:flex;align-items:center;justify-content:center}
+  .donet{font-size:18px;font-weight:700}
+  .dones{font-size:12.5px;color:var(--muted)}
+  .doneopts{display:flex;flex-direction:column;gap:9px;align-items:flex-start;
+    background:#f7f9fb;border:1px solid var(--border);border-radius:9px;
+    padding:12px 18px;margin-top:4px;min-width:310px}
+  /* 底部按钮 */
+  footer{display:flex;align-items:center;gap:12px;padding:15px 28px 18px;border-top:1px solid var(--border);background:#fafbfc}
+  footer .spacer{flex:1}
+  .btn{border:1px solid var(--border);background:#fff;color:#243447;border-radius:9px;
+    padding:9px 18px;font-size:13.5px;cursor:pointer;transition:all .15s}
+  .btn:hover{background:#f2f5f8;border-color:#c9d4df}
+  .btn.primary{background:linear-gradient(180deg,var(--accent2),var(--accent));border-color:var(--accent);
+    color:#fff;font-weight:600;padding:10px 32px;box-shadow:0 4px 14px rgba(0,95,184,.28)}
+  .btn.primary:hover{filter:brightness(1.06)}
+  .btn.danger{background:#fff;border-color:#e6b8b3;color:var(--err)}
+  .btn.danger:hover{background:#fdf4f3}
+  .btn:disabled{opacity:.45;cursor:not-allowed;box-shadow:none;filter:none}
+  .btn.big{padding:11px 38px;font-size:14.5px}
+  .flink{font-size:12px;color:var(--dim);cursor:pointer}
+  .flink:hover{color:var(--accent)}
+  /* 弹层 */
+  .overlay{position:absolute;inset:0;background:rgba(18,32,48,.42);display:none;
+    align-items:center;justify-content:center;z-index:60}
+  .overlay.show{display:flex}
+  .dlg{background:#fff;border-radius:11px;width:560px;box-shadow:0 20px 50px rgba(10,24,40,.35);
+    overflow:hidden}
+  .dlg .dh{padding:15px 20px;font-size:14px;font-weight:600;border-bottom:1px solid var(--border)}
+  .dlg .db{padding:16px 20px;font-size:13px;line-height:1.9}
+  .dlg .df{padding:13px 20px;display:flex;justify-content:flex-end;gap:10px;border-top:1px solid var(--border);background:#fafbfc}
+  .tree{display:flex;flex-direction:column;gap:2px;margin:10px 0 4px;font-size:12.5px;
+    border:1px solid var(--border);border-radius:9px;max-height:170px;overflow:auto;background:#fbfcfd}
+  .tree div{padding:6px 12px;cursor:pointer}
+  .tree div:hover{background:#eef4fb}
+  .tree div.sel{background:#e2eefb;color:var(--accent);font-weight:600}
+  .chip{display:inline-block;font-size:11.5px;color:#3d5670;background:#eef3f8;
+    border:1px solid var(--border);border-radius:8px;padding:2px 9px;margin:2px 6px 2px 0;font-family:Consolas,monospace}
+  /* ---- 真实文件夹浏览 ---- */
+  .addrbar{display:flex;gap:7px;align-items:center;margin-bottom:9px}
+  .addrbar .nav{width:30px;height:30px;border:1px solid var(--border);border-radius:8px;background:#fff;
+    display:flex;align-items:center;justify-content:center;cursor:pointer;font-size:14px;color:#33475c}
+  .addrbar .nav:hover{background:#f2f5f8;border-color:#c9d4df}
+  .addrbar .addr{flex:1;height:30px;border:1px solid var(--border);border-radius:8px;padding:0 10px;
+    font-family:Consolas,monospace;font-size:12.5px;outline:none;color:#243447}
+  .addrbar .addr:focus{border-color:var(--accent);box-shadow:0 0 0 2px rgba(0,95,184,.12)}
+  .browsebody{display:flex;gap:9px;height:224px}
+  .drives{width:158px;border:1px solid var(--border);border-radius:9px;background:#fbfcfd;overflow:auto;padding:5px 0;flex-shrink:0}
+  .dtitle{font-size:11.5px;color:var(--dim);padding:4px 12px 6px}
+  .ditem{display:flex;align-items:center;gap:7px;padding:6px 11px;font-size:12.5px;cursor:pointer;white-space:nowrap}
+  .ditem:hover{background:#eef4fb}
+  .ditem.sel{background:#e2eefb;color:var(--accent);font-weight:600}
+  .ditem .dn{color:var(--dim);font-size:11px;font-weight:400}
+  .dirlist{flex:1;border:1px solid var(--border);border-radius:9px;background:#fff;overflow:auto;padding:5px}
+  .diritem{display:flex;align-items:center;gap:9px;padding:6px 10px;font-size:12.5px;cursor:pointer;border-radius:7px;user-select:none}
+  .diritem:hover{background:#f2f7fc}
+  .diritem.sel{background:#e2eefb;color:var(--accent);font-weight:600}
+  .diritem .arr{color:var(--dim);font-size:11px;margin-left:auto}
+  .newrow{display:flex;gap:8px;align-items:center;margin-top:10px;font-size:12.5px;color:var(--muted)}
+  .newrow input{flex:1;height:30px;border:1px solid var(--border);border-radius:8px;padding:0 10px;font-size:12.5px;outline:none}
+  .newrow input:focus{border-color:var(--accent)}
+  /* ---- 使用说明弹层 ---- */
+  .helpsec{margin-bottom:13px}
+  .helpsec h4{font-size:13px;color:#16283a;margin-bottom:5px}
+  .helpsec div{font-size:12.5px;line-height:1.95;color:#33475c}
+  .helpsec .kbd{font-family:Consolas,monospace;background:#eef3f8;border:1px solid var(--border);
+    border-radius:6px;padding:0 6px;font-size:11.5px}
+</style>
+</head>
+<body>
+
+<div class="installer">
+  <div class="titlebar">
+    <div class="t"><span class="dot"></span> AstraForge 星铸 · 安装程序</div>
+    <div class="wbtns">
+      <div class="wb" title="最小化（由宿主窗口处理）">—</div>
+      <div class="wb close" title="关闭" onclick="winClose()">✕</div>
+    </div>
+  </div>
+
+  <div class="brand">
+    <svg class="arc" viewBox="0 0 200 200">
+      <g fill="none" stroke="#4aa3e8" stroke-linecap="round">
+        <path d="M60 130 A 62 62 0 0 1 170 105" stroke-width="9" opacity=".45"/>
+        <path d="M78 132 A 44 44 0 0 1 156 112" stroke-width="9" opacity=".62"/>
+        <path d="M96 134 A 26 26 0 0 1 142 120" stroke-width="9" opacity=".8"/>
+      </g>
+      <circle cx="120" cy="140" r="9" fill="#eaf4ff"/>
+    </svg>
+    <div class="inner">
+      <div class="mark">
+        <svg width="34" height="34" viewBox="0 0 24 24" fill="none" stroke="#dceeff" stroke-width="1.7" stroke-linecap="round">
+          <path d="M4 8h3l1.7-2.2h6.6L17 8h3v11H4z"/><circle cx="12" cy="13" r="3.2"/>
+        </svg>
+      </div>
+      <div>
+        <div class="name">AstraForge 星铸</div>
+        <div class="sub">深度相机 · 扫描工作站</div>
+      </div>
+    </div>
+    <div class="ver" id="brandver">v0.2.0</div>
+  </div>
+
+  <main>
+    <!-- ① 准备安装 -->
+    <section id="pg-ready" class="active">
+      <div class="h">安装位置</div>
+      <div class="pathrow">
+        <span class="p" id="instPath">C:\Program Files\AstraForge</span>
+        <span class="size" id="needSize">需 1.02 GB · 剩余 128 GB</span>
+        <span class="mini" onclick="openBrowse()">浏览…</span>
+      </div>
+      <div class="checkbar" id="checkbar">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M4 12.5l5 5L20 6.5"/></svg>
+        <span id="checktext">本机检测：16 核 / 32 GB 内存 / USB 3.0 — 满足运行要求</span>
+      </div>
+      <div class="checkbar" id="camcard" style="margin-top:8px">
+        <span id="camtext" style="flex:1;min-width:0;line-height:1.7">正在检测相机与驱动…</span>
+        <span class="mini" style="flex:none" onclick="window.__afRedetect && window.__afRedetect()">重新检测</span>
+      </div>
+      <div class="lic-row">
+        <input type="checkbox" id="agree" style="width:15px;height:15px;accent-color:var(--accent);cursor:pointer">
+        <span>我已阅读并同意</span><span class="lk" onclick="go('pg-license')">《许可与免责声明》</span>
+        <span class="spacer" style="flex:1"></span>
+        <span class="flink" onclick="openOverlay('ov-help')" title="安装前先看使用说明">使用说明</span>
+      </div>
+    </section>
+
+    <!-- ② 自定义安装 -->
+    <section id="pg-custom">
+      <div class="h">自定义安装<span class="sm">按需勾选组件与位置</span></div>
+      <div class="block">
+        <div class="bt">安装组件</div>
+        <label class="chk dis"><input type="checkbox" checked disabled> 主程序与运行时（必需，约 1.1 GB）</label>
+      </div>
+      <div class="block">
+        <div class="bt">快捷方式与启动项</div>
+        <div class="row">
+          <label class="chk"><input type="checkbox" id="optDesk" checked> 桌面</label>
+          <label class="chk"><input type="checkbox" id="optStart" checked> 开始菜单</label>
+          <label class="chk"><input type="checkbox" id="optAuto"> 开机时自动启动</label>
+        </div>
+      </div>
+      <div class="block">
+        <div class="bt">安装位置</div>
+        <div class="pathrow" style="margin-top:2px">
+          <span class="p" id="instPath2">C:\Program Files\AstraForge</span>
+          <span class="mini" onclick="openBrowse()">浏览…</span>
+        </div>
+      </div>
+    </section>
+
+    <!-- ③ 许可协议 -->
+    <section id="pg-license">
+      <div class="h">许可与免责声明</div>
+      <div class="licbox" id="licbox">
+        <h4>一、软件许可（Apache License 2.0）</h4>
+        本软件以 Apache License 2.0 开源协议发布（完整文本见安装目录 LICENSE 文件）。您可以自由使用、
+        修改与再分发本软件，但须保留原始版权声明与许可声明。
+        <h4>二、使用免责声明</h4>
+        1. 本软件为社区开源项目，按“现状”（AS IS）提供，不附带任何明示或暗示的担保。<br>
+        2. 本软件通过 USB 与相机设备通信；设备配置变更（驱动安装、参数交互）存在一定风险，
+        请确认您有权对相关设备进行此类操作。<br>
+        3. 因使用本软件导致的设备损坏、数据丢失或其他损失，开发者不承担责任。<br>
+        4. 激光安全：本软件控制的深度相机内置红外激光发射器；请勿直视镜头或拆卸设备，
+        软件退出时会自动关闭激光发射。<br>
+        5. 融合/标定等计算精度取决于采集数据质量，重要用途请自行复核。
+        <h4>三、商标声明</h4>
+        本软件为针对 Orbbec Astra 系列深度相机的第三方社区工具，与 Orbbec（奥比中光）公司
+        不存在任何隶属、授权或合作关系。“Orbbec”“Astra”等名称与商标归其各自所有者所有。
+        <h4>四、隐私说明</h4>
+        本软件为纯本地应用：不收集、不上传任何用户数据。
+        <h4>五、最低配置要求</h4>
+        Windows 10 x64 及以上 ｜ 双核 CPU ｜ 4GB 内存 ｜ USB 2.0 接口。
+        <h4>六、责任限制</h4>
+        在适用法律允许的最大范围内，作者或版权持有人均不对因本软件或本软件的使用而产生的
+        任何索赔、损害或其他责任承担责任。
+        <div style="height:6px"></div>
+      </div>
+      <div class="licfoot">
+        <span class="scrollhint" id="scrollhint">↓ 请滚动阅读至底端</span>
+        <span id="scrollpct">0%</span>
+      </div>
+    </section>
+
+    <!-- ④ 已安装检测 -->
+    <section id="pg-exists">
+      <div class="existwrap">
+        <div class="existico">
+          <svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="#005fb8" stroke-width="1.9" stroke-linecap="round">
+            <circle cx="12" cy="12" r="9"/><path d="M12 8v4M12 16h.01"/>
+          </svg>
+        </div>
+        <div class="existt" id="existTitle">检测到 AstraForge 星铸已安装</div>
+        <div class="exists" id="existSub">当前安装位置：—</div>
+        <div class="exists" id="existVer" style="margin-top:2px"></div>
+        <div class="existopts">
+          <!-- 真实实现：由注入脚本按版本三态（更新/修复/降级/残留）填文案，点击即开始（含运行中拦截） -->
+          <div class="optcard" id="cardGo">
+            <div class="ot" id="cardTitle">修复安装</div><div class="od" id="cardDesc">重写程序文件，不动数据</div>
+          </div>
+        </div>
+        <div class="tip" style="margin-top:6px">升级/修复不会动「扫描输出」与标定设置</div>
+      </div>
+    </section>
+
+    <!-- ⑥ 安装进度 -->
+    <section id="pg-install">
+      <div class="instwrap">
+        <div class="pct"><span style="font-size:34px;color:var(--accent);font-weight:700" id="pctnum">0</span><span>%</span></div>
+        <div class="bar"><div id="progbar"></div></div>
+        <div class="stage" id="stagetext">正在准备安装…</div>
+        <div class="tip">安装期间请勿关闭此窗口；点「取消」可中止并回滚。</div>
+      </div>
+    </section>
+
+    <!-- ⑦ 安装失败 -->
+    <section id="pg-error">
+      <div class="errwrap">
+        <div class="errico">
+          <svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="#b3261e" stroke-width="2.2" stroke-linecap="round"><path d="M12 5v9M12 18h.01"/><circle cx="12" cy="12" r="9.5"/></svg>
+        </div>
+        <div class="errt">安装失败</div>
+        <div class="errs">目标磁盘空间不足（需要 1.02 GB，可用 0.4 GB）。<br>请清理磁盘或在「浏览…」中选择其他位置后重试。</div>
+        <div class="errdetail">[ERROR] Not enough disk space on 'C:\'<br>required: 1094713344  available: 429916160<br>stage: extract payload (code/ + _internal/)</div>
+        <div class="tip">详细日志：<span class="chip">%TEMP%\AstraForge-setup.log</span></div>
+      </div>
+    </section>
+
+    <!-- ⑧ 完成 -->
+    <section id="pg-done">
+      <div class="donewrap">
+        <div class="doneico">
+          <svg width="34" height="34" viewBox="0 0 24 24" fill="none" stroke="#0f7b0f" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12.5l5 5L20 6.5"/></svg>
+        </div>
+        <!-- 标题文案变体由流程决定：安装完成 / 升级完成 / 修复完成 -->
+        <div class="donet" id="doneTitle">安装完成</div>
+        <div class="dones" id="doneSub">AstraForge 星铸 v0.2.0 已就绪，插入深度相机即可开始扫描</div>
+        <!-- 快捷方式/自启选项已移至安装前（自定义安装页） -->
+      </div>
+    </section>
+  </main>
+
+  <footer>
+    <span class="flink" id="footleft">安装位置可自定义 · 卸载信息自动注册</span>
+    <span class="spacer"></span>
+    <button class="btn" id="btn-extra" style="display:none"></button>
+    <button class="btn" id="btn-secondary">取消</button>
+    <button class="btn primary big" id="btn-main" disabled>立即安装</button>
+  </footer>
+
+  <!-- 弹层：浏览文件夹（真实导航：盘符 / 进入 / 返回上级 / 地址栏 / 新建） -->
+  <div class="overlay" id="ov-browse">
+    <div class="dlg" style="width:664px">
+      <div class="dh">浏览文件夹</div>
+      <div class="db">
+        <div class="addrbar">
+          <div class="nav" onclick="navUp()" title="上一级">↑</div>
+          <input class="addr" id="addrInput" spellcheck="false" onkeydown="if(event.key==='Enter')jumpAddr()">
+          <div class="nav" onclick="jumpAddr()" title="转到">↵</div>
+        </div>
+        <div class="browsebody">
+          <div class="drives" id="driveList"></div>
+          <div class="dirlist" id="dirList"></div>
+        </div>
+        <div class="newrow">
+          <span>文件夹名：</span>
+          <input id="newFolderName" placeholder="在当前位置新建子文件夹（可选）">
+          <button class="btn" onclick="mkNewFolder()">新建文件夹</button>
+        </div>
+        <div class="tip" style="margin-top:9px">将安装到（自动包含应用文件夹）：<span class="chip" id="browseTarget"></span></div>
+      </div>
+      <div class="df">
+        <button class="btn" onclick="closeOverlay('ov-browse')">取消</button>
+        <button class="btn primary" onclick="browseOK()">选择此文件夹</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 弹层：使用说明（速览） -->
+  <div class="overlay" id="ov-help">
+    <div class="dlg" style="width:620px">
+      <div class="dh">AstraForge 星铸 · 使用说明（速览）</div>
+      <div class="db" style="max-height:430px;overflow:auto">
+        <div class="helpsec">
+          <h4>运行</h4>
+          <div>双击桌面图标（或开始菜单）→ 约 2 秒出主界面。内置浏览器内核，<b>无需安装任何额外软件</b>；插入深度相机即可开始。关闭软件会同时关闭设备激光（应用与设备绑定）。</div>
+        </div>
+        <div class="helpsec">
+          <h4>界面（左侧导航七页）</h4>
+          <div>采集 ｜ 3D 扫描 ｜ 转台 ｜ 融合 ｜ 工具箱 ｜ 设置 ｜ 关于。每页首次打开有一句介绍，点 × 可收起。</div>
+        </div>
+        <div class="helpsec">
+          <h4>典型流程 A：转台扫描（小物件 → 完整模型）</h4>
+          <div>① 工具箱「标定」一次（量一个已知距离）→ ② 「转台」每转 15° 拍一帧、转满一圈点「完成采集」→ ③ 「融合」选目录 → 点「开始融合」→ 得到 <span class="kbd">fused_mesh.stl</span>（可打印）与彩色点云 PLY。</div>
+        </div>
+        <div class="helpsec">
+          <h4>典型流程 B：手持记录（没有转台时）</h4>
+          <div>「3D 扫描」→ 点「开始记录」→ 拿相机缓慢绕着物体移动一圈 → 停止 → 到「融合」页选该记录生成模型。</div>
+        </div>
+        <div class="helpsec">
+          <h4>数据位置</h4>
+          <div>快照 / 点云 / 转台目录默认保存在 <span class="kbd">文档\AstraForge\扫描输出</span>；可在「设置 → 导出目录」更改。每次导出都会提示完整路径。</div>
+        </div>
+        <div class="helpsec">
+          <h4>常见问题</h4>
+          <div>· 画面卡：看「采集」页状态卡的<b>预览帧率</b>，低于 15 fps 请反馈<br>
+              · 画面无图：状态卡会显示原因（设备未连接 / 正在连接）<br>
+              · 卸载：控制面板「应用」里卸载，扫描数据可选择保留</div>
+        </div>
+        <div class="helpsec">
+          <h4>反馈</h4>
+          <div>「关于」页一键复制诊断信息 → 邮件至 <b>1544648188z@gmail.com</b>，或贴给 AI 助手求解。</div>
+        </div>
+      </div>
+      <div class="df">
+        <button class="btn" onclick="closeOverlay('ov-help')">关闭</button>
+        <button class="btn primary" onclick="closeOverlay('ov-help');alert('将打开系统中的完整《使用说明.md》文件。')')">打开完整文档</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 弹层：取消安装确认 -->
+  <div class="overlay" id="ov-cancel">
+    <div class="dlg" style="width:460px">
+      <div class="dh">取消安装？</div>
+      <div class="db">
+        安装尚未完成。取消后将删除已写入的文件并回滚所有更改（快捷方式、启动项等）。<br>
+        确定要取消吗？
+      </div>
+      <div class="df">
+        <button class="btn" onclick="closeOverlay('ov-cancel')">继续安装</button>
+        <button class="btn danger" onclick="closeOverlay('ov-cancel');abortInstall()">确定取消</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 弹层：软件正在运行（更新前需关闭） -->
+  <div class="overlay" id="ov-running">
+    <div class="dlg" style="width:460px">
+      <div class="dh">AstraForge 正在运行</div>
+      <div class="db">
+        更新需要先关闭正在运行的 AstraForge，否则程序文件被占用会导致更新失败。<br>
+        是否关闭它并继续？
+      </div>
+      <div class="df">
+        <button class="btn" onclick="window.__afCancelRunning && __afCancelRunning()">取消</button>
+        <button class="btn" onclick="window.__afContinueRunning && __afContinueRunning()">关闭并继续</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 弹层：驱动处理向导（Zadig 引导） -->
+  <div class="overlay" id="ov-driver">
+    <div class="dlg" style="width:540px">
+      <div class="dh">驱动处理向导（深度相机）</div>
+      <div class="db">
+        本软件需要深度相机绑定 <b>WinUSB</b> 驱动。三步：<br>
+        1. 确认相机已插好（USB 直连，不经扩展坞更稳）；<br>
+        2. 点「打开 Zadig 工具」：Options → List All Devices → 选中 <b>ASTRA S Pro</b>（或 Astra）
+           → 右侧目标驱动选 <b>WinUSB</b> → 点 <b>Replace Driver</b>；<br>
+        3. 回到这里点「重新检测」，显示「✓ 深度相机：就绪 —— 驱动 WinUSB」即完成。
+        <div class="tip" style="margin-top:8px">
+          注意：官方 Orbbec OpenNI 驱动（obdrv4）与本软件互斥；切换后官方工具将暂时不可用（可随时切回）。
+          彩色相机是标准 UVC，请勿改动其驱动。
+        </div>
+      </div>
+      <div class="df">
+        <button class="btn" onclick="closeOverlay('ov-driver')">关闭</button>
+        <button class="btn" onclick="window.__afDriverRedetect && window.__afDriverRedetect()">重新检测</button>
+        <button class="btn" onclick="window.__afOpenZadig && window.__afOpenZadig()">打开 Zadig 工具</button>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<div class="page-note">
+  安装器模板 v3（真实流程版 · 无模拟动画）。URL 直达：<b>?p=ready|custom|license|exists|install|error|done</b>
+  　弹层：<b>&amp;ov=browse|help|cancel</b>　｜　
+  真实流程：启动（自动检测已安装 → 升级/修复/移交卸载）→ 准备 →（勾协议）立即安装 → 进度 → 完成 / 失败；
+  进度 / 完成 / 失败页为静态设计帧——真实进度由安装事件驱动（解压 → 写文件 → 快捷方式 → 注册），模板中不模拟。
+</div>
+
+<script>
+  /* ================= 状态与页面切换 ================= */
+  let page = 'pg-ready'
+
+  function go(id){
+    page = id
+    document.querySelectorAll('section').forEach(s => s.classList.toggle('active', s.id === id))
+    syncFooter()
+  }
+
+  /* ================= 底部按钮配置（每页独立） ================= */
+  function syncFooter(){
+    const b = document.getElementById('btn-main')
+    const s2 = document.getElementById('btn-secondary')
+    const ex = document.getElementById('btn-extra')
+    const left = document.getElementById('footleft')
+    ex.style.display = 'none'; s2.style.display = ''; left.textContent = ''; left.style.color = ''
+
+    if (page === 'pg-ready'){
+      b.textContent = '立即安装'; b.disabled = !document.getElementById('agree').checked
+      s2.textContent = '自定义安装'
+      left.textContent = '安装位置可自定义 · 卸载信息自动注册'
+    } else if (page === 'pg-custom'){
+      const ag = document.getElementById('agree').checked
+      b.textContent = '开始安装'; b.disabled = !ag
+      s2.textContent = '返回'
+      left.textContent = ag ? '组件与位置可自由勾选' : '请先在上一页勾选《许可与免责声明》后开始安装'
+      left.style.color = ag ? '' : 'var(--warn)'
+    } else if (page === 'pg-license'){
+      b.textContent = '我已阅读并同意'; b.disabled = !licAtBottom()
+      s2.textContent = '返回'
+      left.textContent = '需阅读至底端方可同意'
+    } else if (page === 'pg-exists'){
+      b.textContent = '升级安装'; b.disabled = false
+      s2.textContent = '返回'
+      ex.style.display = ''; ex.textContent = '卸载'
+      ex.className = 'btn danger'; ex.onclick = handoffUninstall
+      left.textContent = '升级 / 修复不会动扫描数据与设置'
+    } else if (page === 'pg-install'){
+      b.textContent = '安装中…'; b.disabled = true
+      s2.textContent = '取消'
+      left.textContent = '安装进行中 · 请勿关闭窗口'
+    } else if (page === 'pg-error'){
+      b.textContent = '重试'; b.disabled = false
+      s2.textContent = '退出'
+      left.textContent = '安装未完成 · 可按「重试」重新安装，或查看日志排查'
+    } else if (page === 'pg-done'){
+      b.textContent = '立即运行'; b.disabled = false
+      s2.textContent = '打开使用说明'
+      left.textContent = ''
+    }
+  }
+
+  /* ================= 主按钮动作 ================= */
+  function mainAction(){
+    switch(page){
+      case 'pg-ready':   go('pg-install'); break         /* 真实实现：启动安装，进度由事件推送 */
+      case 'pg-custom':  go('pg-install'); break         /* 真实实现：按所选组件启动安装 */
+      case 'pg-license': document.getElementById('agree').checked = true; go('pg-ready'); break
+      case 'pg-exists':  go('pg-install'); break         /* 真实实现：启动升级流程 */
+      case 'pg-error':   go('pg-install'); break         /* 真实实现：重试安装 */
+      case 'pg-done':    alert('将启动 AstraForge 并退出安装程序。'); break
+    }
+  }
+
+  function secondary(){
+    if (page === 'pg-license' || page === 'pg-custom' || page === 'pg-exists') return go('pg-ready')
+    if (page === 'pg-install') return openOverlay('ov-cancel')
+    if (page === 'pg-error') return alert('安装程序将退出。')
+    if (page === 'pg-done') return openOverlay('ov-help')
+    if (page === 'pg-ready') return go('pg-custom')
+  }
+
+  /* ================= 许可滚动门槛 ================= */
+  const licbox = document.getElementById('licbox')
+  function licAtBottom(){
+    return licbox.scrollTop + licbox.clientHeight >= licbox.scrollHeight - 10
+  }
+  licbox.addEventListener('scroll', () => {
+    const p = Math.min(100, Math.round((licbox.scrollTop + licbox.clientHeight) / licbox.scrollHeight * 100))
+    document.getElementById('scrollpct').textContent = p + '%'
+    const h = document.getElementById('scrollhint')
+    if (licAtBottom()){ h.textContent = '✓ 已读完，可点击「我已阅读并同意」'; h.style.color = 'var(--ok)' }
+    syncFooter()
+  })
+
+  /* ================= 浏览文件夹（真实导航行为；目录数据为演示） ================= */
+  const DRIVES = [['C:', '系统盘'], ['D:', '数据盘'], ['E:', '应用盘'], ['F:', '资料盘']]
+  const FS = {
+    'C:': ['Program Files', 'Program Files (x86)', 'Windows', 'Users', 'ProgramData', 'PerfLogs'],
+    'C:\\Program Files': ['AstraForge', 'Common Files', 'NVIDIA Corporation', 'Windows NT', 'Windows Defender'],
+    'C:\\Program Files\\AstraForge': [],
+    'C:\\Program Files (x86)': ['Common Files', 'Microsoft', 'Windows Kits'],
+    'C:\\Windows': ['System32', 'SysWOW64', 'Fonts', 'Temp', 'Logs'],
+    'C:\\Users': ['Public', 'User'],
+    'C:\\Users\\User': ['Desktop', 'Documents', 'Downloads', 'AppData', 'Pictures'],
+    'C:\\Users\\User\\Desktop': [],
+    'C:\\Users\\User\\Documents': ['AstraForge'],
+    'C:\\Users\\User\\Documents\\AstraForge': ['扫描输出'],
+    'C:\\Users\\User\\AppData': ['Local', 'Roaming'],
+    'C:\\Users\\User\\AppData\\Local': ['Programs', 'Temp'],
+    'D:': ['Apps', 'Games', 'Work', 'Backup'],
+    'D:\\Apps': ['AstraForge', 'Tools'],
+    'E:': ['Projects', 'Media'],
+    'F:': ['Downloads', 'Music', 'Videos']
+  }
+  const APP_DIR = 'AstraForge'
+  let curPath = 'C:\\Program Files\\AstraForge'
+  let selPath = curPath
+
+  /* 安装路径 = 所选目录 + 应用子目录（若末级已是应用名则不重复追加）
+     —— 与真实安装器一致：浏览选的是父目录，安装器负责带上完整前缀 */
+  function finalDirOf(p){
+    p = norm(p)
+    const last = p.slice(p.lastIndexOf(S.sep) + 1)
+    return last.toLowerCase() === APP_DIR.toLowerCase() ? p : p + S.sep + APP_DIR
+  }
+
+  const S = { sep: String.fromCharCode(92) }   /* 反斜杠常量（避免转义混淆） */
+  function norm(p){
+    p = String(p || '').trim().replace(/\//g, S.sep)
+    while (p.indexOf(S.sep + S.sep) >= 0) p = p.split(S.sep + S.sep).join(S.sep)   /* 重复分隔符 → 单个 */
+    if (!p) return 'C:'
+    if (!/^[A-Za-z]:/.test(p)) p = 'C:' + S.sep + p
+    if (!/^[A-Za-z]:$/.test(p)) p = p.replace(/\\+$/, '')
+    return p
+  }
+  function join(dir, name){ return norm(dir) === dir.replace(/[\\/]+$/, '') && /^[A-Za-z]:$/.test(dir) ? dir + S.sep + name : norm(dir) + S.sep + name }
+  function parentOf(p){
+    p = norm(p)
+    if (/^[A-Za-z]:$/.test(p)) return p
+    const i = p.lastIndexOf(S.sep)
+    const up = p.slice(0, i)
+    return /^[A-Za-z]:$/.test(up) ? up : (up || 'C:')
+  }
+  function childrenOf(p){
+    p = norm(p)
+    if (FS[p]) return FS[p].slice()
+    if (/^[A-Za-z]:$/.test(p)) return ['Program Files', 'Users', 'Windows', 'Temp']
+    return ['New folder', 'Temp']
+  }
+  function diskSvg(){ return '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#4a6b8a" stroke-width="1.8" stroke-linecap="round"><rect x="3" y="6" width="18" height="12" rx="2.5"/><path d="M3 12h18"/><circle cx="17" cy="15" r="1"/></svg>' }
+  function folderSvg(){ return '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#e0a63c" stroke-width="1.8" stroke-linejoin="round"><path d="M3.5 7.5h6l2 2h9v9.5h-17z"/></svg>' }
+
+  function renderBrowse(){
+    const dl = document.getElementById('driveList')
+    dl.innerHTML = '<div class="dtitle">此电脑</div>' + DRIVES.map(([d, n]) =>
+      '<div class="ditem' + (curPath.toUpperCase().startsWith(d) ? ' sel' : '') + '" data-drive="' + d + '">'
+      + diskSvg() + '<span>' + d + '</span><span class="dn">' + n + '</span></div>').join('')
+    dl.querySelectorAll('.ditem').forEach(el => { el.onclick = () => loadPath(el.dataset.drive) })
+
+    const list = childrenOf(curPath)
+    const el = document.getElementById('dirList')
+    el.innerHTML = list.length
+      ? list.map(n => '<div class="diritem' + (selPath === join(curPath, n) ? ' sel' : '') + '" data-name="' + n + '">'
+          + folderSvg() + '<span>' + n + '</span><span class="arr">双击进入</span></div>').join('')
+      : '<div class="tip" style="padding:14px">（这个文件夹是空的）</div>'
+    el.querySelectorAll('.diritem').forEach(node => {
+      node.onclick = () => { selPath = join(curPath, node.dataset.name); renderBrowse() }
+      node.ondblclick = () => { loadPath(join(curPath, node.dataset.name)) }
+    })
+
+    document.getElementById('addrInput').value = curPath
+    document.getElementById('browseTarget').textContent = finalDirOf(selPath)
+  }
+  function loadPath(p){ curPath = norm(p); selPath = curPath; renderBrowse() }
+  function navUp(){ loadPath(parentOf(curPath)) }
+  function jumpAddr(){
+    const v = document.getElementById('addrInput').value
+    if (!v) return
+    loadPath(v)
+  }
+  function mkNewFolder(){
+    const inp = document.getElementById('newFolderName')
+    const name = (inp.value || '').trim()
+    if (!name) { alert('请输入文件夹名'); return }
+    if (/[\\/:*?"<>|]/.test(name)) { alert('文件夹名不能包含 \\ / : * ? " < > |'); return }
+    const full = join(curPath, name)
+    if (!FS[curPath]) FS[curPath] = []
+    if (FS[curPath].indexOf(name) >= 0) { alert('同名文件夹已存在'); return }
+    FS[curPath].push(name); FS[full] = []
+    inp.value = ''
+    selPath = full
+    renderBrowse()
+  }
+  function openBrowse(){ renderBrowse(); openOverlay('ov-browse') }
+  function browseOK(){
+    const target = finalDirOf(selPath)
+    document.getElementById('instPath').textContent = target
+    document.getElementById('instPath2').textContent = target
+    document.getElementById('footleft').textContent =
+      target.toUpperCase().startsWith('C:\\PROGRAM FILES') ? '将请求管理员权限写入 Program Files'
+                                                          : '当前为「仅为我安装」模式（免管理员）'
+    closeOverlay('ov-browse')
+  }
+
+  /* 安装器不含卸载实现：移交给独立的卸载程序（真实做法：启动 卸载器.exe） */
+  function handoffUninstall(){
+    alert('将启动「AstraForge 卸载程序」（独立窗口）。')
+  }
+  function openOverlay(id){ document.getElementById(id).classList.add('show') }
+  function closeOverlay(id){ document.getElementById(id).classList.remove('show') }
+
+  /* ================= 进度与窗口动作（静态设计帧） =================
+     本模板不含进度演示（无计时器 / 无自动跳转）。
+     进度页的百分比、进度条、阶段文案在真实实现中由安装事件驱动。
+     阶段文案（供实现参考）：
+       全新安装：正在校验安装包 → 正在解压程序文件 → 正在写入运行时组件 →
+                 正在创建快捷方式 → 正在注册卸载信息
+       升级安装：正在停止运行中的实例 → 正在备份旧版本 → 正在更新程序文件 →
+                 正在迁移设置 → 正在刷新快捷方式
+       修复安装：正在校验现有文件 → 正在重写程序文件 → 正在修复运行时组件 →
+                 正在校验完整性
+     完成页标题文案变体：安装完成 / 升级完成 / 修复完成（由实际流程决定）。
+     ================= */
+  function abortInstall(){
+    /* 真实实现：回滚已写入的文件与已建项（快捷方式 / 启动项），完成后再返回或退出 */
+    closeOverlay('ov-cancel')
+    go('pg-ready')
+  }
+  /* 标题栏关闭：安装中 → 先走取消确认；否则退出 */
+  function winClose(){
+    if (page === 'pg-install') openOverlay('ov-cancel')
+    else alert('安装程序将退出。')
+  }
+
+  /* ================= 初始化 ================= */
+  document.getElementById('agree').addEventListener('change', syncFooter)
+  document.getElementById('btn-secondary').addEventListener('click', secondary)
+  document.getElementById('btn-main').addEventListener('click', mainAction)
+  syncFooter()
+
+  /* URL 参数直达：?p=ready|custom|license|exists|install|error|done */
+  const usp = new URLSearchParams(location.search)
+  const qp = usp.get('p')
+  if (qp && document.getElementById('pg-' + qp)) go('pg-' + qp)   /* 设计评审：静态直达，无模拟 */
+  const qbdir = usp.get('bdir')
+  if (qbdir){ curPath = norm(qbdir); selPath = curPath }
+  const qov = usp.get('ov')
+  if (qov === 'browse') openBrowse()
+  if (usp.get('dbg')){   /* 调试：显示路径解析与 FS 命中情况 */
+    const keys = Object.keys(FS)
+    document.getElementById('browseTarget').textContent =
+      'cur=[' + curPath + '] sel=[' + selPath + '] FS键数=' + keys.length +
+      ' 命中=' + (!!FS[curPath]) + ' 含该键=' + (keys.indexOf(curPath) >= 0) +
+      ' 近似键=' + JSON.stringify(keys.filter(k => k.toLowerCase().indexOf('program files') >= 0))
+  }
+  if (qov === 'help') openOverlay('ov-help')
+  if (qov === 'cancel') openOverlay('ov-cancel')
+</script>
+
+<!-- ⬇⬇ 真实安装器桥（由 build_ui.py 注入；草稿本体不改） ⬇⬇ -->
+<style>
+  /* 草稿是"设计稿对比页"（居中卡片 + 外边距）；真实窗口里要铺满 */
+  html,body{height:100%;overflow:hidden;padding:0!important;margin:0!important;display:block!important;background:#eef1f5}
+  .installer{width:100%!important;height:100vh;border-radius:0!important;box-shadow:none!important}
+  .page-note{display:none!important}
+</style>
+<script src="qrc:///qtwebchannel/qwebchannel.js"></script>
+<script src="bridge.js"></script>
+</body>
+</html>

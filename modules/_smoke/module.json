@@ -1,0 +1,6 @@
+{
+  "name": "_smoke",
+  "version": "0.1.0",
+  "entry": "module.py:SmokeModule",
+  "depends_on": []
+}

@@ -1,0 +1,6 @@
+{
+  "name": "measure",
+  "version": "1.0.1",
+  "entry": "module.py:MeasureModule",
+  "depends_on": []
+}

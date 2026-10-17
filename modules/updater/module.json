@@ -1,0 +1,6 @@
+{
+  "name": "updater",
+  "version": "1.0.0",
+  "entry": "module.py:UpdaterModule",
+  "depends_on": []
+}

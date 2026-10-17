@@ -1,0 +1,6 @@
+{
+  "name": "calib",
+  "version": "1.0.0",
+  "entry": "module.py:CalibModule",
+  "depends_on": []
+}

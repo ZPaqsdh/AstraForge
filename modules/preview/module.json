@@ -1,0 +1,8 @@
+{
+  "name": "preview",
+  "version": "1.0.0",
+  "entry": "module.py:PreviewModule",
+  "depends_on": [
+    "device"
+  ]
+}

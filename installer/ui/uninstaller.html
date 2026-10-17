@@ -1,0 +1,339 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>AstraForge 星铸 · 卸载程序 UI 模板 v1（真实流程）</title>
+<style>
+  :root{
+    --bg:#eef1f5; --win:#ffffff; --fg:#1b1b1b; --muted:#5f6b7a; --dim:#93a0b0;
+    --accent:#005fb8; --accent2:#0a84ff; --border:#dbe2ea; --ok:#0f7b0f; --warn:#9d5d00;
+    --err:#b3261e; --brand1:#06263f; --brand2:#0a3d63;
+  }
+  *{margin:0;padding:0;box-sizing:border-box}
+  body{
+    background:linear-gradient(135deg,#dde5ee,#eef1f5 40%,#e6ecf3);
+    min-height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;
+    font-family:"Segoe UI","Microsoft YaHei UI","Microsoft YaHei",system-ui,sans-serif;color:var(--fg);
+    padding:26px 16px;gap:12px;
+  }
+  .page-note{font-size:12.5px;color:#5b6b7d;text-align:center;line-height:1.8;max-width:760px}
+  .page-note b{color:#1b3b5c}
+  .installer{
+    width:780px;background:var(--win);border-radius:12px;overflow:hidden;position:relative;
+    box-shadow:0 24px 60px rgba(16,32,56,.22),0 2px 8px rgba(16,32,56,.10);
+    display:flex;flex-direction:column;
+  }
+  /* 标题栏（卸载器：无最小化，仅关闭） */
+  .titlebar{height:38px;display:flex;align-items:center;justify-content:space-between;
+    padding:0 10px 0 14px;background:var(--brand1);color:#cfe3f5;font-size:12px}
+  .titlebar .t{display:flex;align-items:center;gap:8px;letter-spacing:.3px}
+  .titlebar .dot{width:14px;height:14px;border-radius:4px;
+    background:linear-gradient(135deg,#e2725f,#ff9a8a)}
+  .titlebar .wb{width:30px;height:24px;display:flex;align-items:center;justify-content:center;
+    border-radius:5px;cursor:pointer;opacity:.85}
+  .titlebar .wb:hover{background:#c93b3b;color:#fff;opacity:1}
+  /* 品牌横幅 */
+  .brand{position:relative;height:142px;flex-shrink:0;background:
+      radial-gradient(120% 160% at 12% -20%,#0d5a8f 0%,transparent 55%),
+      linear-gradient(115deg,var(--brand1) 0%,var(--brand2) 55%,#0e4f7d 100%);overflow:hidden}
+  .brand svg.arc{position:absolute;right:-40px;top:-70px;width:290px;height:290px;opacity:.45}
+  .brand .inner{position:absolute;left:28px;bottom:18px;display:flex;align-items:center;gap:15px}
+  .brand .mark{width:56px;height:56px;border-radius:15px;background:rgba(255,255,255,.10);
+    border:1px solid rgba(255,255,255,.22);display:flex;align-items:center;justify-content:center}
+  .brand .name{font-size:23px;font-weight:700;color:#fff;letter-spacing:.5px;line-height:1.15}
+  .brand .sub{font-size:12px;color:#9fc6e6;margin-top:4px;letter-spacing:.4px}
+  .brand .ver{position:absolute;right:18px;bottom:18px;font-size:11.5px;color:#8fb8da;
+    border:1px solid rgba(255,255,255,.22);border-radius:9px;padding:2px 9px}
+  main{flex:1;min-height:290px;padding:20px 28px 10px;position:relative}
+  section{display:none}
+  section.active{display:block}
+  .h{font-size:14.5px;font-weight:600;margin-bottom:10px}
+  /* 首页 */
+  .existwrap{display:flex;flex-direction:column;align-items:center;gap:12px;padding-top:6px;text-align:center}
+  .existico{width:58px;height:58px;border-radius:50%;background:#fdeceb;
+    display:flex;align-items:center;justify-content:center}
+  .existt{font-size:16.5px;font-weight:700}
+  .exists{font-size:12.5px;color:var(--muted)}
+  .existopts{display:flex;gap:12px;margin-top:6px}
+  .optcard{border:1px solid var(--border);border-radius:10px;padding:12px 20px;cursor:pointer;
+    background:#fff;text-align:center;min-width:158px;transition:all .15s}
+  .optcard:hover{border-color:var(--accent);box-shadow:0 4px 14px rgba(0,95,184,.12)}
+  .optcard .ot{font-size:13.5px;font-weight:600}
+  .optcard .od{font-size:11.5px;color:var(--muted);margin-top:3px}
+  .tip{font-size:11.5px;color:var(--dim);line-height:1.9}
+  /* 确认 */
+  .ulist{background:#f8fafc;border:1px solid var(--border);border-radius:9px;padding:11px 16px;
+    font-size:12.5px;line-height:2}
+  .ulist .k{color:var(--muted)}
+  label.chk{display:flex;align-items:center;gap:9px;cursor:pointer;user-select:none;font-size:13px}
+  label.chk input{width:15px;height:15px;accent-color:var(--accent);cursor:pointer}
+  /* 进度 */
+  .instwrap{display:flex;flex-direction:column;justify-content:center;height:250px;gap:15px}
+  .pct{font-size:34px;font-weight:700;color:#d7503f;font-variant-numeric:tabular-nums}
+  .pct span{font-size:15px;color:var(--muted);font-weight:400;margin-left:6px}
+  .bar{height:10px;border-radius:9px;background:#e7edf3;overflow:hidden}
+  .bar>div{height:100%;width:0%;border-radius:9px;
+    background:linear-gradient(90deg,#d7503f,#e2725f)}
+  .stage{font-size:13px;color:var(--muted)}
+  /* 完成 */
+  .donewrap{display:flex;flex-direction:column;align-items:center;justify-content:center;height:262px;gap:12px;text-align:center}
+  .doneico{width:62px;height:62px;border-radius:50%;background:#eef4fb;
+    display:flex;align-items:center;justify-content:center}
+  .donet{font-size:18px;font-weight:700}
+  .dones{font-size:12.5px;color:var(--muted)}
+  .chip{display:inline-block;font-size:11.5px;color:#3d5670;background:#eef3f8;
+    border:1px solid var(--border);border-radius:8px;padding:2px 9px;margin:2px 6px 2px 0;font-family:Consolas,monospace}
+  /* 底部 */
+  footer{display:flex;align-items:center;gap:12px;padding:15px 28px 18px;border-top:1px solid var(--border);background:#fafbfc}
+  footer .spacer{flex:1}
+  .btn{border:1px solid var(--border);background:#fff;color:#243447;border-radius:9px;
+    padding:9px 18px;font-size:13.5px;cursor:pointer;transition:all .15s}
+  .btn:hover{background:#f2f5f8;border-color:#c9d4df}
+  .btn.primary{background:linear-gradient(180deg,var(--accent2),var(--accent));border-color:var(--accent);
+    color:#fff;font-weight:600;padding:10px 32px;box-shadow:0 4px 14px rgba(0,95,184,.28)}
+  .btn.primary:hover{filter:brightness(1.06)}
+  .btn.danger{background:linear-gradient(180deg,#d7503f,#b3261e);border-color:#b3261e;color:#fff;
+    font-weight:600;box-shadow:0 4px 14px rgba(179,38,30,.26)}
+  .btn.danger:hover{filter:brightness(1.06)}
+  .btn.big{padding:11px 38px;font-size:14.5px}
+  .btn:disabled{opacity:.45;cursor:not-allowed;box-shadow:none;filter:none}
+  .flink{font-size:12px;color:var(--dim)}
+  /* 弹层 */
+  .overlay{position:absolute;inset:0;background:rgba(18,32,48,.42);display:none;
+    align-items:center;justify-content:center;z-index:60}
+  .overlay.show{display:flex}
+  .dlg{background:#fff;border-radius:11px;width:460px;box-shadow:0 20px 50px rgba(10,24,40,.35);overflow:hidden}
+  .dlg .dh{padding:15px 20px;font-size:14px;font-weight:600;border-bottom:1px solid var(--border)}
+  .dlg .db{padding:16px 20px;font-size:13px;line-height:1.9}
+  .dlg .df{padding:13px 20px;display:flex;justify-content:flex-end;gap:10px;border-top:1px solid var(--border);background:#fafbfc}
+</style>
+</head>
+<body>
+
+<div class="installer">
+  <div class="titlebar">
+    <div class="t"><span class="dot"></span> AstraForge 星铸 · 卸载程序</div>
+    <div class="wb" title="关闭" onclick="closeApp()">✕</div>
+  </div>
+
+  <div class="brand">
+    <svg class="arc" viewBox="0 0 200 200">
+      <g fill="none" stroke="#4aa3e8" stroke-linecap="round">
+        <path d="M60 130 A 62 62 0 0 1 170 105" stroke-width="9" opacity=".45"/>
+        <path d="M78 132 A 44 44 0 0 1 156 112" stroke-width="9" opacity=".62"/>
+        <path d="M96 134 A 26 26 0 0 1 142 120" stroke-width="9" opacity=".8"/>
+      </g>
+      <circle cx="120" cy="140" r="9" fill="#eaf4ff"/>
+    </svg>
+    <div class="inner">
+      <div class="mark">
+        <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="#dceeff" stroke-width="1.7" stroke-linecap="round">
+          <path d="M4 8h3l1.7-2.2h6.6L17 8h3v11H4z"/><circle cx="12" cy="13" r="3.2"/>
+        </svg>
+      </div>
+      <div>
+        <div class="name">AstraForge 星铸</div>
+        <div class="sub">卸载程序</div>
+      </div>
+    </div>
+    <div class="ver">已安装 v0.2.0</div>
+  </div>
+
+  <main>
+    <!-- ① 卸载首页 -->
+    <section id="pg-home" class="active">
+      <div class="existwrap">
+        <div class="existico">
+          <svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="#b3261e" stroke-width="1.9"
+               stroke-linecap="round" stroke-linejoin="round">
+            <path d="M5 7h14M9.5 7V5.2h5V7M6.6 7l.9 12.2h9l.9-12.2"/>
+            <path d="M10.5 10.6v5.2M13.5 10.6v5.2"/>
+          </svg>
+        </div>
+        <div class="existt">卸载 AstraForge 星铸</div>
+        <div class="exists" id="homeInfo">安装位置：C:\Program Files\AstraForge　｜　版本 v0.2.0　｜　安装于 2026-10-14</div>
+        <div class="existopts">
+          <div class="optcard" onclick="handoffRepair()">
+            <div class="ot">修复安装</div>
+            <div class="od">重写程序文件，保留数据与设置</div>
+          </div>
+        </div>
+        <div class="tip" style="margin-top:6px">卸载不影响「扫描输出」与标定设置——下一步可选择是否一并删除</div>
+      </div>
+    </section>
+
+    <!-- ② 卸载流程（确认 / 进度 / 完成 三态） -->
+    <section id="pg-run">
+      <!-- 确认 -->
+      <div id="st-confirm">
+        <div class="h">确认卸载</div>
+        <div class="ulist">
+          <div><span class="k">将移除：</span>程序文件（C:\Program Files\AstraForge）、桌面/开始菜单快捷方式、开机启动项</div>
+          <div><span class="k">将保留：</span>「扫描输出」目录、标定设置　（如需一并删除，勾选下方第二个选项）</div>
+        </div>
+        <label class="chk" style="margin-top:12px"><input type="checkbox" id="keep" checked> 保留扫描输出与设置（推荐）</label>
+        <label class="chk" style="margin-top:9px"><input type="checkbox" id="wipe"> 同时删除全部用户数据（不可恢复）</label>
+        <div class="tip" style="margin-top:10px" id="confirmTip">卸载前请确认软件已关闭（未关闭时卸载程序会先尝试停止相关进程）。</div>
+      </div>
+      <!-- 进度 -->
+      <div id="st-running" style="display:none">
+        <div class="instwrap">
+          <div class="pct"><span id="pctNum" style="font-size:34px;color:#d7503f;font-weight:700">0</span><span>%</span></div>
+          <div class="bar"><div id="barFill"></div></div>
+          <div class="stage" id="stageText">正在准备…</div>
+          <div class="tip">卸载期间请勿关闭此窗口。</div>
+        </div>
+      </div>
+      <!-- 完成 -->
+      <div id="st-done" style="display:none">
+        <div class="donewrap">
+          <div class="doneico">
+            <svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="#005fb8" stroke-width="2.4"
+                 stroke-linecap="round" stroke-linejoin="round"><path d="M4 12.5l5 5L20 6.5"/></svg>
+          </div>
+          <div class="donet">卸载完成</div>
+          <div class="dones">已移除程序文件、快捷方式与开机启动项</div>
+          <div class="tip" id="doneTip">「扫描输出」与设置已保留在：<span class="chip">文档\AstraForge\扫描输出</span><span class="chip">%LOCALAPPDATA%\AstraForge</span></div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer>
+    <span class="flink" id="footLeft">卸载程序 · 仅移除程序本体，扫描数据默认保留</span>
+    <span class="spacer"></span>
+    <button class="btn" id="btn-secondary">关闭</button>
+    <button class="btn primary big" id="btn-main">卸载</button>
+  </footer>
+
+  <!-- 弹层：最终确认 -->
+  <div class="overlay" id="ov-confirm">
+    <div class="dlg">
+      <div class="dh">再次确认</div>
+      <div class="db" id="ovText">将从此电脑移除 AstraForge 星铸。此操作不会影响你的扫描数据（按上一步选项保留）。</div>
+      <div class="df">
+        <button class="btn" onclick="closeOverlay('ov-confirm')">再想想</button>
+        <button class="btn danger" onclick="closeOverlay('ov-confirm');beginUninstall()">确认卸载</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="page-note">
+  卸载程序模板 v1（真实流程版 · 无模拟动画，与安装器模板分开）。URL 直达：<b>?p=home|run</b>；状态：<b>&amp;st=confirm|running|done</b>　｜　
+  真实流程：首页（修复安装 + 底部：卸载 / 关闭）→ 确认（保留数据选项 + 最终确认）→ 进度 → 完成；
+  进度 / 完成为静态设计帧——真实进度由卸载事件驱动，模板中不模拟。
+</div>
+
+<script>
+  let page = 'pg-home'
+  let state = 'confirm'          /* confirm | running | done */
+
+  function go(id){
+    page = id
+    document.querySelectorAll('section').forEach(s => s.classList.toggle('active', s.id === id))
+    if (id === 'pg-run') setState('confirm')
+    syncFooter()
+  }
+  function setState(st){
+    state = st
+    document.getElementById('st-confirm').style.display = st === 'confirm' ? '' : 'none'
+    document.getElementById('st-running').style.display = st === 'running' ? '' : 'none'
+    document.getElementById('st-done').style.display    = st === 'done' ? '' : 'none'
+    syncFooter()
+  }
+
+  function syncFooter(){
+    const b = document.getElementById('btn-main')
+    const s2 = document.getElementById('btn-secondary')
+    const left = document.getElementById('footLeft')
+    b.className = 'btn primary big'
+    s2.style.display = ''
+
+    if (page === 'pg-home'){
+      b.textContent = '卸载'
+      s2.textContent = '关闭'
+      left.textContent = '卸载程序 · 仅移除程序本体，扫描数据默认保留'
+    } else if (state === 'confirm'){
+      b.textContent = '开始卸载'; b.className = 'btn danger big'
+      s2.textContent = '返回'
+      left.textContent = '勾选项：' + (document.getElementById('wipe').checked
+        ? '将一并删除扫描输出与设置（不可恢复）' : '保留扫描输出与设置')
+    } else if (state === 'running'){
+      b.textContent = '卸载中…'; b.disabled = true
+      s2.style.display = 'none'
+      left.textContent = ''
+    } else {
+      b.textContent = '完成'; b.disabled = false
+      s2.style.display = 'none'
+      left.textContent = ''
+    }
+    if (state !== 'running') b.disabled = false
+  }
+
+  function mainAction(){
+    if (page === 'pg-home') return go('pg-run')
+    if (state === 'confirm') return openOverlay('ov-confirm')
+    if (state === 'done')    return closeApp()
+  }
+  function secondary(){
+    if (page === 'pg-run' && state === 'confirm') return go('pg-home')
+    if (page === 'pg-home') return closeApp()
+  }
+  function closeApp(){ alert('卸载程序将退出。') }
+  function handoffRepair(){
+    /* 真实实现：调用安装器（带修复参数），由安装器执行修复流程 */
+    alert('将启动「AstraForge 安装程序」的修复模式。')
+  }
+  function openOverlay(id){ document.getElementById(id).classList.add('show') }
+  function closeOverlay(id){ document.getElementById(id).classList.remove('show') }
+
+  /* ---- 卸载执行（静态设计帧） ----
+     本模板不含进度演示（无计时器 / 无自动跳转）。
+     进度页的百分比、进度条、阶段文案在真实实现中由卸载事件驱动。
+     阶段文案（供实现参考）：
+       正在检查运行中的进程 → 正在停止 AstraForge 相关进程 → 正在移除程序文件 →
+       正在移除桌面与开始菜单快捷方式 → 正在清理开机启动项 → 正在注销卸载信息
+       （若选择删除数据）→ 正在删除扫描输出与设置
+     完成页「保留位置」文案按上一步选项二选一（实现时由卸载结果决定）。
+     ---- */
+  function beginUninstall(){ setState('running') }
+
+  document.getElementById('keep').addEventListener('change', e => {
+    if (e.target.checked) document.getElementById('wipe').checked = false
+    syncFooter()
+  })
+  document.getElementById('wipe').addEventListener('change', e => {
+    if (e.target.checked){
+      document.getElementById('keep').checked = false
+      document.getElementById('ovText').textContent =
+        '【注意】你选择了「一并删除全部用户数据」：扫描输出与标定设置将被永久删除，无法恢复。确认继续？'
+    } else {
+      document.getElementById('keep').checked = true
+      document.getElementById('ovText').textContent =
+        '将从此电脑移除 AstraForge 星铸。此操作不会影响你的扫描数据（按上一步选项保留）。'
+    }
+    syncFooter()
+  })
+
+  /* URL 直达（设计评审用）：?p=home|run  &st=confirm|running|done —— 静态状态帧，非动画 */
+  const usp = new URLSearchParams(location.search)
+  const qp = usp.get('p')
+  if (qp === 'run'){ go('pg-run') } else { go('pg-home') }
+  const qst = usp.get('st')
+  if (qst === 'running'){ setState('running') }
+  if (qst === 'done'){ setState('done') }
+  syncFooter()
+</script>
+
+<!-- ⬇⬇ 真实安装器桥（由 build_ui.py 注入；草稿本体不改） ⬇⬇ -->
+<style>
+  /* 草稿是"设计稿对比页"（居中卡片 + 外边距）；真实窗口里要铺满 */
+  html,body{height:100%;overflow:hidden;padding:0!important;margin:0!important;display:block!important;background:#eef1f5}
+  .installer{width:100%!important;height:100vh;border-radius:0!important;box-shadow:none!important}
+  .page-note{display:none!important}
+</style>
+<script src="qrc:///qtwebchannel/qwebchannel.js"></script>
+<script src="bridge.js"></script>
+</body>
+</html>

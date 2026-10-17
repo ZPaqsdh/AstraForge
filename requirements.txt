@@ -1,0 +1,19 @@
+# AstraForge 运行依赖
+# 环境：Windows 10/11 x64 · Python 3.10+（本机实测 3.14）
+# 安装：pip install -r requirements.txt
+
+# 内置浏览器窗口（QtWebEngine）——完整版会带 Chromium 运行时，体积较大
+PySide6>=6.6
+
+# 图像 / 点云 / 融合
+numpy>=1.26
+opencv-python>=4.8
+Pillow>=10.0
+scipy>=1.11
+
+# 外设
+pyusb>=1.2          # 深度相机 USB 访问（需 WinUSB 绑定，见 README）
+pyserial>=3.5       # 转台控制器（可选）
+
+# 深度相机驱动封装（随仓库提供，本地 wheel）
+./vendor/orbbec_astra_raw-0.2.2-py3-none-any.whl
