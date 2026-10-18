@@ -3,7 +3,7 @@
 # 安装：pip install -r requirements.txt
 
 # 内置浏览器窗口（QtWebEngine）——完整版会带 Chromium 运行时，体积较大
-PySide6>=6.6
+PySide6>=6.12.0
 
 # 图像 / 点云 / 融合
 numpy>=1.26
