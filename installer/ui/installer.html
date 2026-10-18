@@ -235,6 +235,11 @@
         <span id="camtext" style="flex:1;min-width:0;line-height:1.7">正在检测相机与驱动…</span>
         <span class="mini" style="flex:none" onclick="window.__afRedetect && window.__afRedetect()">重新检测</span>
       </div>
+      <div class="checkbar" id="verline" style="margin-top:8px">
+        <span id="vertext" style="flex:1;min-width:0;line-height:1.7">当前版本</span>
+        <span class="mini" id="verbtn" style="flex:none;display:none"
+              onclick="window.__afUseUpdate && window.__afUseUpdate()">下载并安装</span>
+      </div>
       <div class="lic-row">
         <input type="checkbox" id="agree" style="width:15px;height:15px;accent-color:var(--accent);cursor:pointer">
         <span>我已阅读并同意</span><span class="lk" onclick="go('pg-license')">《许可与免责声明》</span>

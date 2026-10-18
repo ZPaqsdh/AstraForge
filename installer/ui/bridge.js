@@ -9,7 +9,8 @@
   var B = null, BOOT = null;
   var $ = function (id) { return document.getElementById(id); };
   var Q = function (sel) { return document.querySelector(sel); };
-  var S = { sep: '\\', dir: '', version: '', mode: 'fresh', installed: null };
+  var S = { sep: '\\', dir: '', version: '', mode: 'fresh', installed: null,
+            update: null, useUpdate: false };
 
   /* 隐藏"设计稿说明"块（真实运行时不需要） */
   var note = Q('.page-note'); if (note) note.style.display = 'none';
@@ -113,15 +114,61 @@
     el.innerHTML = rep.html;
     if (card) card.className = 'checkbar' + (rep.cls ? ' ' + rep.cls : '');
   };
+  /* ---------------- 在线版本 / 驱动安装 ---------------- */
+  window.__afUpdate = function (json) {
+    var r = {}; try { r = JSON.parse(json); } catch (e) {}
+    var t = $('vertext'), b = $('verbtn'), cur = (BOOT && BOOT.version) || '';
+    if (!t) return;
+    if (r.ok && r.payload_url) S.update = r;   /* 在线安装器：同版本也需要下载载荷 */
+    if (r.ok && r.newer) {
+      t.innerHTML = '当前版本 v' + esc(cur) + ' · <b style="color:#c42b1c">发现新版本 v' + esc(r.latest) + '</b>';
+      if (b) { b.style.display = 'inline'; b.textContent = '下载并安装 v' + r.latest; }
+      var m = $('btn-main');
+      if (m && BOOT.online_only) m.textContent = '下载并安装 v' + r.latest;
+    } else if (r.ok) {
+      t.innerHTML = '当前版本 v' + esc(cur) + ' · 已是最新版本';
+      if (BOOT.online_only) {
+        var m2 = $('btn-main');
+        if (m2) m2.textContent = '下载并安装 v' + esc(r.latest || cur);
+      }
+    } else if (r.reason === 'not_configured') {
+      t.innerHTML = '当前版本 v' + esc(cur) + (BOOT.online_only
+        ? ' · <b style="color:#c42b1c">更新源未配置，无法在线安装</b>'
+        : ' · 离线安装');
+    } else {
+      t.innerHTML = '当前版本 v' + esc(cur) + ' · 检查更新失败（可按本地版本安装）';
+    }
+  };
+  window.__afUseUpdate = function () {
+    if (!S.update) return;
+    S.useUpdate = true;
+    var m = $('btn-main'); if (m) m.textContent = '下载并安装 v' + S.update.latest;
+  };
+  window.__afInstallDriver = function (id) {
+    var t = $('camtext'); if (t) t.innerHTML = '正在安装驱动…（如弹出 UAC 请确认）';
+    if (B) B.installDriver(id);
+  };
+  window.__afDriverResult = function (json) {
+    var r = {}; try { r = JSON.parse(json); } catch (e) {}
+    var t = $('camtext');
+    if (t) t.innerHTML = (r.ok ? '✓ ' : '⚠ ') + esc(r.msg || (r.ok ? '驱动已安装' : '驱动安装失败'))
+      + (r.elevated ? '' : '');
+    if (window.__afRedetect) window.__afRedetect();
+  };
+
   function camReport(r) {
     if (!r || !r.ok) return { html: '— 相机检测不可用（跳过）', cls: '' };
     var d = r.depth || {}, c = r.color || {};
     var dl, cls = '';
+    var pid = d.pid ? ('（PID ' + esc(d.pid) + '）') : '';
+    var act = (d.match && d.match.id)
+      ? '<span class="mini" onclick="window.__afInstallDriver && window.__afInstallDriver(\'' + esc(d.match.id) + '\')">安装匹配驱动</span>'
+      : '<span class="mini" onclick="window.__afDriverWizard && window.__afDriverWizard()">打开驱动处理向导</span>';
     if (!d.found) { dl = '— 深度相机：未检测到（可先安装软件，插上即用）'; }
-    else if (d.state === 'ready') { dl = '✓ 深度相机：就绪 —— 驱动「' + esc(d.service || 'WinUSB') + '」'; }
-    else if (d.state === 'conflict') { dl = '⚠ 深度相机：驱动「' + esc(d.service) + '」与 AstraForge 不兼容，需切换为 WinUSB　<span class="mini" onclick="window.__afDriverWizard && window.__afDriverWizard()">打开驱动处理向导</span>'; cls = 'low'; }
-    else if (d.state === 'nodriver') { dl = '✗ 深度相机：未检测到驱动 —— 需安装 WinUSB 驱动　<span class="mini" onclick="window.__afDriverWizard && window.__afDriverWizard()">打开驱动处理向导</span>'; cls = 'warn'; }
-    else { dl = '⚠ 深度相机：驱动「' + esc(d.service || '?') + '」（未知类型，可能不兼容）'; cls = 'low'; }
+    else if (d.state === 'ready') { dl = '✓ 深度相机：就绪 —— 驱动「' + esc(d.service || 'WinUSB') + '」' + pid; }
+    else if (d.state === 'conflict') { dl = '⚠ 深度相机 ' + pid + '：驱动「' + esc(d.service) + '」与 AstraForge 不兼容，需切换为 WinUSB　' + act; cls = 'low'; }
+    else if (d.state === 'nodriver') { dl = '✗ 深度相机 ' + pid + '：未检测到驱动 —— 需安装 WinUSB 驱动　' + act; cls = 'warn'; }
+    else { dl = '⚠ 深度相机 ' + pid + '：驱动「' + esc(d.service || '?') + '」未知' + (d.match ? '' : '（未收录设备）') + '　' + act; cls = 'low'; }
     var cl = c.found ? '✓ 彩色相机：就绪（系统自带驱动）' : '— 彩色相机：未检测到（可选）';
     return { html: dl + '<br>' + cl, cls: cls };
   }
@@ -212,9 +259,16 @@
     if (p2) p2.textContent = BOOT.default_dir;
     S.dir = BOOT.default_dir;
     var ns = $('needSize');
-    if (ns && BOOT.payload_kb) ns.textContent = '需 ' + fmtSize(BOOT.payload_kb)
-      + ' · 剩余 ' + (BOOT.free_gb >= 0 ? BOOT.free_gb + ' GB' : '?');
+    if (ns) {
+      if (BOOT.online_only) {
+        ns.textContent = '在线安装（需联网下载）· 剩余 ' + (BOOT.free_gb >= 0 ? BOOT.free_gb + ' GB' : '?');
+      } else if (BOOT.payload_kb) {
+        ns.textContent = '需 ' + fmtSize(BOOT.payload_kb)
+          + ' · 剩余 ' + (BOOT.free_gb >= 0 ? BOOT.free_gb + ' GB' : '?');
+      }
+    }
     redetectCams();                             /* 相机/驱动异步检测（只读） */
+    if (B && B.checkUpdate) B.checkUpdate();    /* 上游版本检查（3 秒超时，失败静默） */
     if (BOOT.installed) {                       /* 已装过 → 走更新/修复/残留页 */
       fillExists(BOOT.installed, BOOT.relation || 'same');
       if (typeof go === 'function') { go('pg-exists'); syncExistsLabel(); }
@@ -252,7 +306,11 @@
   function installOpts() {
     var g = function (id, dflt) { var el = $(id); return el ? el.checked : dflt; };
     return JSON.stringify({ dir: S.dir, desktop: g('optDesk', true), startmenu: g('optStart', true),
-      autostart: g('optAuto', false), version: (BOOT && BOOT.version) || '0.0.0' });
+      autostart: g('optAuto', false), version: (BOOT && BOOT.version) || '0.0.0',
+      use_update: !!S.useUpdate,
+      payload_url: S.update ? S.update.payload_url : '',
+      payload_sha256: S.update ? S.update.payload_sha256 : '',
+      latest_version: S.update ? S.update.latest : '' });
   }
 
   /* ---------------- 接管安装器流程 ---------------- */
@@ -292,6 +350,10 @@
       if (page === 'pg-license') { $('agree').checked = true; go('pg-ready'); return; }
       if (page === 'pg-ready' || page === 'pg-custom') { S.mode = 'fresh'; }
       if (page === 'pg-ready' || page === 'pg-custom' || page === 'pg-exists' || page === 'pg-error') {
+        if (BOOT.online_only && !(S.update && S.update.payload_url)) {
+          alert('这是在线安装器：需要联网获取安装包。\n请联网后重试，或下载「离线完整包」。');
+          return;
+        }
         gateRunning(function () {
           go('pg-install'); setStage('正在准备安装…'); setPct(0);
           if (S.mode === 'clean' && B) {

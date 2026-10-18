@@ -53,6 +53,8 @@ class Bridge(QObject):
     progress = Signal(int, str)
     finished = Signal(bool, str, str)
     cams = Signal(str)
+    updateReady = Signal(str)
+    driverDone = Signal(str)
 
     def __init__(self, view: QWebEngineView):
         super().__init__()
@@ -98,6 +100,9 @@ class Bridge(QObject):
             'default_dir': d,
             'app_dir': C.APP_NAME,
             'payload_kb': need,
+            'has_payload': payload is not None,
+            'online_only': payload is None,
+            'update_configured': bool(C._update_url()),
             'free_gb': C._disk_free_gb(d[:3] if len(d) > 2 else d),
             'drives': C.list_dir(d).get('drives', []),
             'test': bool(SB.on),
@@ -147,6 +152,31 @@ class Bridge(QObject):
             except Exception as e:            # noqa: BLE001
                 r = {'ok': False, 'err': str(e)}
             self.cams.emit(json.dumps(r, ensure_ascii=False))
+        threading.Thread(target=run, daemon=True).start()
+
+    @Slot()
+    def checkUpdate(self):
+        """异步查上游 update.json（3~4 秒超时）。结果经信号回主线程再送 JS。"""
+        def run():
+            try:
+                r = C.fetch_update()
+            except Exception as e:            # noqa: BLE001
+                r = {'ok': False, 'reason': 'error', 'msg': str(e)}
+            if r.get('ok'):
+                r['current'] = ARGS.version
+                r['newer'] = C.cmp_version(r.get('latest', ''), ARGS.version) > 0
+            self.updateReady.emit(json.dumps(r, ensure_ascii=False))
+        threading.Thread(target=run, daemon=True).start()
+
+    @Slot(str)
+    def installDriver(self, driver_id: str):
+        """安装匹配驱动（异步；签名 INF 走 pnputil，非管理员弹 UAC）。"""
+        def run():
+            try:
+                r = C.install_driver(driver_id)
+            except Exception as e:            # noqa: BLE001
+                r = {'ok': False, 'msg': str(e)}
+            self.driverDone.emit(json.dumps(r, ensure_ascii=False))
         threading.Thread(target=run, daemon=True).start()
 
     # ---- 安装 ----
@@ -289,7 +319,10 @@ def main():
     ap.add_argument('--snap', default='', help='自检：显示 N 秒后截图并退出')
     ap.add_argument('--snap-delay', type=float, default=6.0)
     ap.add_argument('--snap-js', default='', help='自检：截图前 1.5 秒执行一段 JS（UI 验证用）')
+    ap.add_argument('--update-url', default='', help='覆盖在线更新源（测试用；也可用 AF_UPDATE_URL）')
     ARGS = ap.parse_args()
+    if ARGS.update_url:
+        os.environ['AF_UPDATE_URL'] = ARGS.update_url
     SB = C.Sandbox(Path(ARGS.test_root) if ARGS.test_root else None)
 
     mode = 'uninstall' if (ARGS.uninstall or ARGS.mode == 'uninstall') else 'install'
@@ -319,8 +352,21 @@ def main():
                 if r.get('ok') and r.get('cleanup_paths'):
                     C.schedule_final_cleanup(r['cleanup_paths'])
             else:
-                r = C.install({'dir': ARGS.dir or C.default_dir(), 'desktop': True,
-                               'startmenu': True, 'version': ARGS.version}, sb=SB)
+                opts = {'dir': ARGS.dir or C.default_dir(), 'desktop': True,
+                        'startmenu': True, 'version': ARGS.version}
+                if C._payload_path() is None:          # 在线下载器：静默模式也要先取载荷
+                    u = C.fetch_update()
+                    if u.get('ok') and u.get('payload_url'):
+                        opts.update({'payload_url': u['payload_url'],
+                                     'payload_sha256': u.get('payload_sha256', ''),
+                                     'latest_version': u.get('latest', ''),
+                                     'version': u.get('latest') or ARGS.version})
+                        r = C.install(opts, sb=SB)
+                    else:
+                        r = {'ok': False,
+                             'msg': '在线安装器：无法获取更新源（' + str(u.get('reason', '未知')) + '）'}
+                else:
+                    r = C.install(opts, sb=SB)
         except Exception as e:
             import traceback
             _log('silent 异常: ' + traceback.format_exc())
@@ -355,6 +401,8 @@ def main():
     bridge.finished.connect(lambda ok, msg, d:
                             bridge._js(f'__afDone && __afDone({str(ok).lower()}, {json.dumps(msg)}, {json.dumps(d)})'))
     bridge.cams.connect(lambda s: bridge._js('window.__afCams && window.__afCams(' + json.dumps(s) + ')'))
+    bridge.updateReady.connect(lambda s: bridge._js('window.__afUpdate && window.__afUpdate(' + json.dumps(s) + ')'))
+    bridge.driverDone.connect(lambda s: bridge._js('window.__afDriverResult && window.__afDriverResult(' + json.dumps(s) + ')'))
 
     view.load(QUrl.fromLocalFile(str(html)))
     view.show()

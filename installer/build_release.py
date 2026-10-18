@@ -1,24 +1,23 @@
 # -*- coding: utf-8 -*-
-"""build_release.py — 打「安装包」发布包（摊平结构）
+"""build_release.py — 打「单文件安装器」发布包
 
-产物（默认到 <项目根>/发行/安装器/AstraForge-Setup-v<版本>/）：
-    AstraForge-安装.exe     安装向导入口（必须与运行时目录同级——PyInstaller onedir 硬性要求）
-    _setup_internal/        安装器自带运行时（含 QtWebEngine；--contents-directory 定制名）
-    payload.zip             待安装的应用整包（= 发行版内容 + 卸载器 AstraForge-卸载.exe + 其运行时）
-    安装器说明.md
+产物（<项目根>/发行/安装器/AstraForge-Setup-v<版本>/）：
+    AstraForge-Setup-Online-v<版本>.exe     在线下载器（单文件，安装时拉最新载荷）
+    AstraForge-Setup-Offline-v<版本>.exe    离线完整包（单文件，自带本版本载荷）
+    AstraForge-<版本>-payload.zip           在线安装用的载荷（上传到 GitHub Release，用户无需下载）
+    update.json                             版本清单模板（上传到仓库/Release，填 URL 与 SHA256）
+    安装器说明.md                            本地说明（不随 exe 分发）
 
-设计（2026-10-17 修）：
-- 发布包**摊平**：入口 exe 与它的运行时同层，双击即用。
-  （此前是嵌套 `AstraForge-Setup/` + 包根一个 exe 副本 → 双击报
-  "Failed to load Python DLL ... _internal ..."——副本找不到同级运行时。）
-- 安装完成后的安装目录 =
-  启动器（AstraForge.exe）+ 应用本体（_internal/ code/ …）
-  + 卸载器（AstraForge-卸载.exe）+ 卸载器运行时（_setup_internal/）。
-- 卸载器运行时目录名用 --contents-directory 定制为 _setup_internal，
-  避免与应用自己的 _internal 在安装目录根撞名。
+设计：
+- 两个安装器都是 **PyInstaller onefile**：exe 内自带安装器运行时 + HTML UI + 驱动库；
+  离线包额外内嵌 payload.zip。
+- 卸载器单独打一个轻量 onefile（tkinter，约 20MB），装进 payload，安装后落在安装目录根。
+- 不再有 `_setup_internal/`、外置 `payload.zip` 等挂载文件。
 
-用法：python installer/build_release.py [版本号]
+用法：
+    python installer/build_release.py [版本号] [--only online|offline|uninstall]
 """
+import hashlib
 import os
 import shutil
 import subprocess
@@ -33,16 +32,18 @@ SRC = WS / 'AstraForge'
 INST = SRC / 'installer'
 RELEASE_APP = WS / '发行' / 'AstraForge'
 OUT_ROOT = WS / '发行' / '安装器'
-VERSION = sys.argv[1] if len(sys.argv) > 1 else '0.2.10'
-TS = time.strftime('%H%M%S')
-SETUP_CONTENTS = '_setup_internal'     # 安装器/卸载器运行时目录名（与 build 命令一致）
-# 本机护栏会拦"批量删除旧产物"→ 覆盖式重建不可行：产物目录与构建目录都带时间戳
-OUT = OUT_ROOT / (f'AstraForge-Setup-v{VERSION}' if not (OUT_ROOT / f'AstraForge-Setup-v{VERSION}').exists()
-                  else f'AstraForge-Setup-v{VERSION}-b{TS}')
-WORK = OUT_ROOT / f'_build-{TS}'
-DIST = WORK / 'dist'
+_args = sys.argv[1:]
+VERSION = _args[0] if (_args and not _args[0].startswith('--')) else '0.2.10'
+ONLY = _args[_args.index('--only') + 1] if '--only' in _args else ''
+TS = time.strftime('%Y%m%d-%H%M%S')
 
+OUT = OUT_ROOT / f'AstraForge-Setup-v{VERSION}'
+if OUT.exists() and not ONLY:
+    OUT = OUT_ROOT / f'AstraForge-Setup-v{VERSION}-{TS}'
+WORK = OUT_ROOT / f'_build-{TS}'
+DRIVER_PACK = INST / 'driver' / 'pack'
 PAYLOAD_ITEMS = ['AstraForge.exe', '_internal', 'code', '使用说明.md', 'README.md']
+ICON = SRC / 'assets' / 'icon.ico'
 
 
 def run(cmd, **kw):
@@ -56,29 +57,34 @@ def step(msg):
     print(f'\n=== {msg} ({time.strftime("%H:%M:%S")})', flush=True)
 
 
-def build_setup_exe():
-    step('① PyInstaller 打包安装器')
-    icon = SRC / 'assets' / 'icon.ico'
-    cmd = [PY, '-m', 'PyInstaller', '--noconfirm', '--clean', '--windowed', '--onedir',
-           '--name', 'AstraForge-Setup',
-           '--contents-directory', SETUP_CONTENTS,
-           '--distpath', str(DIST), '--workpath', str(WORK / 'pyi'),
-           '--specpath', str(WORK),
-           '--add-data', f'{INST / "ui"}{os.pathsep}ui',
-           '--collect-all', 'PySide6',
-           ]
-    if icon.exists():
-        cmd += ['--icon', str(icon)]
-    cmd.append(str(INST / 'setup_main.py'))
+def sha256(p: Path) -> str:
+    h = hashlib.sha256()
+    with open(p, 'rb') as f:
+        for b in iter(lambda: f.read(1 << 20), b''):
+            h.update(b)
+    return h.hexdigest()
+
+
+def build_uninstaller() -> Path:
+    step('① 打包轻量卸载器（onefile）')
+    dist = WORK / 'dist-uninst'
+    cmd = [PY, '-m', 'PyInstaller', '--noconfirm', '--clean', '--onefile', '--windowed',
+           '--name', 'AstraForge-Uninstall',
+           '--distpath', str(dist), '--workpath', str(WORK / 'pyi-uninst'),
+           '--specpath', str(WORK / 'spec-uninst')]
+    if ICON.exists():
+        cmd += ['--icon', str(ICON)]
+    cmd.append(str(INST / 'uninstall_main.py'))
     run(cmd, cwd=str(INST))
-    built = DIST / 'AstraForge-Setup'
-    if not (built / 'AstraForge-Setup.exe').exists() or not (built / SETUP_CONTENTS).exists():
-        raise SystemExit(f'打包产物缺失：{built}')
-    return built
+    exe = dist / 'AstraForge-Uninstall.exe'
+    if not exe.exists():
+        raise SystemExit(f'卸载器产物缺失：{exe}')
+    print(f'   → {exe}（{exe.stat().st_size/1024/1024:.1f} MB）')
+    return exe
 
 
-def stage_payload(setup_dir: Path):
-    step('② 组装载荷（发行版 + 卸载器）')
+def stage_payload(uninst_exe: Path) -> Path:
+    step('② 组装载荷（软件 + 驱动库 + 卸载器）')
     stage = WORK / 'payload'
     stage.mkdir(parents=True, exist_ok=True)
     for it in PAYLOAD_ITEMS:
@@ -93,29 +99,22 @@ def stage_payload(setup_dir: Path):
             shutil.copy2(s, d)
         print(f'   + {it}')
 
-    # 驱动工具也放进安装目录（装完后可随时再跑；约 5MB）
-    if (INST / 'driver').is_dir():
-        shutil.copytree(INST / 'driver', stage / '驱动工具',
+    # 驱动库（装完后留在安装目录，可复查/重装驱动）
+    if (DRIVER_PACK / 'manifest.json').exists():
+        shutil.copytree(DRIVER_PACK, stage / '驱动工具',
                         ignore=shutil.ignore_patterns('__pycache__'))
-        print('   + 驱动工具/（Zadig + 说明）')
+        print('   + 驱动工具/（manifest + INF/CAT + Zadig）')
 
-    # 卸载器：与安装在根的应用并列 —— exe（改名副本）+ 运行时目录，都落在安装目录根
-    exe_src = setup_dir / 'AstraForge-Setup.exe'
-    rt_src = setup_dir / SETUP_CONTENTS
-    if exe_src.exists() and rt_src.exists():
-        shutil.copy2(exe_src, stage / 'AstraForge-卸载.exe')
-        shutil.copytree(rt_src, stage / SETUP_CONTENTS,
-                        ignore=shutil.ignore_patterns('__pycache__', '*.pyc'))
-        print(f'   + AstraForge-卸载.exe + {SETUP_CONTENTS}/（卸载器，安装目录根可见）')
-    else:
-        print('   [warn] 安装器产物不齐，卸载器未进载荷')
+    # 轻量卸载器
+    shutil.copy2(uninst_exe, stage / 'AstraForge-卸载.exe')
+    print(f'   + AstraForge-卸载.exe（{uninst_exe.stat().st_size/1024/1024:.1f} MB）')
+
     lic = INST / '许可与免责声明.txt'
     if lic.exists():
         shutil.copy2(lic, stage / 'LICENSE-说明.txt')
 
     step('③ 压缩 payload.zip')
-    zp = OUT / 'payload.zip'
-    zp.parent.mkdir(parents=True, exist_ok=True)
+    zp = WORK / 'payload.zip'
     n = 0
     with zipfile.ZipFile(zp, 'w', zipfile.ZIP_DEFLATED, compresslevel=6) as z:
         for root, dirs, files in os.walk(stage):
@@ -129,60 +128,104 @@ def stage_payload(setup_dir: Path):
     return zp
 
 
+def build_installer(mode: str, payload: Path | None) -> Path:
+    """mode: online / offline。online 不塞载荷；offline 塞 payload.zip。"""
+    step(f'④ 打包{"在线下载器" if mode == "online" else "离线完整包"}（onefile）')
+    name = 'AstraForge-Setup-Online' if mode == 'online' else 'AstraForge-Setup-Offline'
+    dist = WORK / f'dist-{mode}'
+    cmd = [PY, '-m', 'PyInstaller', '--noconfirm', '--clean', '--onefile', '--windowed',
+           '--name', name,
+           '--distpath', str(dist), '--workpath', str(WORK / f'pyi-{mode}'),
+           '--specpath', str(WORK / f'spec-{mode}'),
+           '--add-data', f'{INST / "ui"}{os.pathsep}ui',
+           '--add-data', f'{DRIVER_PACK}{os.pathsep}driver_pack',
+           '--collect-all', 'PySide6']
+    if ICON.exists():
+        cmd += ['--icon', str(ICON)]
+    if mode == 'offline':
+        if not payload or not payload.exists():
+            raise SystemExit('离线包缺少 payload.zip')
+        cmd += ['--add-data', f'{payload}{os.pathsep}.']
+    cmd.append(str(INST / 'setup_main.py'))
+    run(cmd, cwd=str(INST))
+    exe = dist / f'{name}.exe'
+    if not exe.exists():
+        raise SystemExit(f'安装器产物缺失：{exe}')
+    print(f'   → {exe}（{exe.stat().st_size/1024/1024:.0f} MB）')
+    return exe
+
+
+def write_meta(payload: Path):
+    step('⑤ 写 update.json / 说明')
+    digest = sha256(payload)
+    upd = OUT / 'update.json'
+    upd.write_text(f"""{{
+  "app": "AstraForge",
+  "latest": "{VERSION}",
+  "min_installer": "{VERSION}",
+  "payload_url": "https://github.com/<owner>/<repo>/releases/download/v{VERSION}/AstraForge-{VERSION}-payload.zip",
+  "payload_sha256": "{digest}",
+  "notes_url": "https://github.com/<owner>/<repo>/releases/tag/v{VERSION}"
+}}
+""", encoding='utf-8')
+    (OUT / '安装器说明.md').write_text(f"""# AstraForge 星铸 · 安装器 v{VERSION}
+
+本目录是构建产物（上传 GitHub Release 用）：
+
+| 文件 | 用途 |
+|---|---|
+| `AstraForge-Setup-Online-v{VERSION}.exe` | **在线下载器**（主推）：单文件，安装时联网拉最新载荷 |
+| `AstraForge-Setup-Offline-v{VERSION}.exe` | **离线完整包**：单文件，自带本版本载荷 |
+| `AstraForge-{VERSION}-payload.zip` | 在线安装用的载荷资产（用户不需要手动下载） |
+| `update.json` | 版本清单模板：把 `<owner>/<repo>` 换成实际仓库后上传 |
+
+## 上传顺序（GitHub Release）
+
+1. 新建 tag `v{VERSION}` 的 Release；
+2. 上传 `AstraForge-{VERSION}-payload.zip` 与两个安装器 exe；
+3. 修改 `update.json` 里的 `<owner>/<repo>`，上传到仓库根（或 Release）；
+4. 安装器默认读 `DEFAULT_UPDATE_URL`（`installer/setup_core.py`），建仓后填一次即可。
+
+## 用户下载哪个？
+
+- 正常用户：`AstraForge-Setup-Online-v{VERSION}.exe`（几百 MB，联网安装最新版）
+- 没网/内网：`AstraForge-Setup-Offline-v{VERSION}.exe`（约 1 GB，自带完整载荷）
+
+生成时间：{time.strftime('%Y-%m-%d %H:%M:%S')}
+载荷 SHA-256：`{digest}`
+""", encoding='utf-8')
+    print(f'   → {upd}')
+
+
 def main():
     OUT.mkdir(parents=True, exist_ok=True)
     WORK.mkdir(parents=True, exist_ok=True)
-    setup_dir = build_setup_exe()
 
-    # 发布包摊平：入口 exe（改名副本）与运行时目录同层 —— 双击直接可用
-    shutil.copy2(setup_dir / 'AstraForge-Setup.exe', OUT / 'AstraForge-安装.exe')
-    shutil.copytree(setup_dir / SETUP_CONTENTS, OUT / SETUP_CONTENTS,
-                    ignore=shutil.ignore_patterns('__pycache__'))
-    print(f'   → {OUT / "AstraForge-安装.exe"} + {SETUP_CONTENTS}/')
+    uninst = build_uninstaller()
+    payload = stage_payload(uninst)
 
-    # 驱动工具随包（安装器根 驱动工具/ —— 安装前「驱动处理向导」直接调用）
-    if (INST / 'driver').is_dir():
-        shutil.copytree(INST / 'driver', OUT / '驱动工具',
-                        ignore=shutil.ignore_patterns('__pycache__'))
-        print(f'   → {OUT / "驱动工具"}/（Zadig + 说明）')
+    built = []
+    if ONLY in ('', 'offline'):
+        exe = build_installer('offline', payload)
+        dst = OUT / f'AstraForge-Setup-Offline-v{VERSION}.exe'
+        shutil.copy2(exe, dst)
+        built.append(dst)
+    if ONLY in ('', 'online'):
+        exe = build_installer('online', None)
+        dst = OUT / f'AstraForge-Setup-Online-v{VERSION}.exe'
+        shutil.copy2(exe, dst)
+        built.append(dst)
 
-    stage_payload(setup_dir)
+    # payload 资产（online 安装器需要）
+    pz = OUT / f'AstraForge-{VERSION}-payload.zip'
+    shutil.copy2(payload, pz)
+    write_meta(pz)
 
-    (OUT / '安装器说明.md').write_text(f"""# AstraForge 星铸 · 安装包 v{VERSION}
-
-## 怎么装（把本目录整个拷到目标机器）
-
-1. `AstraForge-安装.exe`、`{SETUP_CONTENTS}/`、`payload.zip` 三个必须放在一起（同目录）；
-2. 双击 **`AstraForge-安装.exe`** → 选安装位置（默认 `%LOCALAPPDATA%\\Programs\\AstraForge`，免管理员）
-   → 勾选组件 → 立即安装。
-
-## 装完之后（安装目录里有什么）
-
-- **启动器**：`AstraForge.exe`（桌面 / 开始菜单也有「AstraForge 星铸」快捷方式）
-- **卸载器**：`AstraForge-卸载.exe`（在安装目录根，双击即进卸载界面）；等价入口还有：
-  - 开始菜单 →「卸载 AstraForge 星铸」
-  - Windows 设置 → 应用 →「AstraForge 星铸」
-  - 控制面板 → 程序和功能
-- `install.json`：本次安装的版本 / 时间 / 选项。
-- `驱动工具\\`：Zadig（安装器「驱动处理向导」使用；来源与校验见其中 README）。
-
-卸载默认保留 `扫描输出` 与设置 `data`（任务数据不丢）。
-
-## 静默安装/卸载（脚本部署用）
-
-```
-AstraForge-安装.exe --silent  --dir "D:\\Apps\\AstraForge"
-AstraForge-卸载.exe --uninstall --silent
-```
-
-生成时间：{time.strftime('%Y-%m-%d %H:%M:%S')}
-""", encoding='utf-8')
-
-    print(f'\n✅ 发布目录：{OUT}')
-    for p in sorted(OUT.rglob('*')):
-        if p.is_file() and p.parent == OUT:
-            print(f'   {p.name:28s} {p.stat().st_size/1024/1024:8.1f} MB')
-    print(f'   {SETUP_CONTENTS}/  (运行时目录)')
+    print('\n✅ 产物目录：', OUT)
+    for p in sorted(OUT.iterdir()):
+        if p.is_file():
+            print(f'   {p.name:<48} {p.stat().st_size/1024/1024:8.1f} MB  '
+                  f'sha256={sha256(p)[:16]}…')
 
 
 if __name__ == '__main__':

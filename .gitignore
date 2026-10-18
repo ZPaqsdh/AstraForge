@@ -22,6 +22,7 @@ payload.zip
 
 # ---------- 第三方二进制（GPL，自行下载，见 installer/driver/README-驱动工具.md） ----------
 installer/driver/*.exe
+installer/driver/**/*.exe
 
 # ---------- 系统 ----------
 Thumbs.db

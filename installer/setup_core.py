@@ -17,6 +17,7 @@ import os
 import shutil
 import subprocess
 import sys
+import tempfile
 import time
 import zipfile
 from pathlib import Path
@@ -28,6 +29,9 @@ UNINST_EXE = 'AstraForge-卸载.exe'
 SM_UNINST_NAME = f'卸载 {APP_CN}.lnk'      # 开始菜单里的「卸载」入口
 PUBLISHER = 'AstraForge 项目'
 URL = 'https://github.com/'          # TODO-002 建仓后填
+# 在线更新源（update.json）。留空 = 离线模式：不检查、不报错。
+# 建仓后填：https://raw.githubusercontent.com/<owner>/<repo>/main/update.json
+DEFAULT_UPDATE_URL = ''
 MIN_CPU = 2
 MIN_RAM_GB = 4
 MIN_DISK_GB = 3.0            # 程序本体 ~0.9GB，留余量
@@ -254,20 +258,24 @@ def detect_cameras(timeout: int = 15) -> dict:
         if len(parts) < 3:
             continue
         iid, status, svc = parts[0].strip(), parts[1].strip(), parts[2].strip()
-        if 'PID_0403' in iid:
-            low = svc.lower()
-            if 'winusb' in low:
-                state = 'ready'
-            elif low.startswith('obdrv') or 'orbbec' in low:
-                state = 'conflict'
-            elif not svc:
-                state = 'nodriver'
-            else:
-                state = 'other'
-            out['depth'] = {'found': True, 'state': state, 'service': svc,
-                            'status': status, 'instance': iid}
-        elif 'PID_0501' in iid:
+        import re as _re
+        m = _re.search(r'PID_([0-9A-Fa-f]{4})', iid)
+        pid = m.group(1).upper() if m else ''
+        low = svc.lower()
+        if 'winusb' in low:
+            state = 'ready'
+        elif low.startswith('obdrv') or 'orbbec' in low:
+            state = 'conflict'
+        elif not svc:
+            state = 'nodriver'
+        else:
+            state = 'other'
+        if pid == '0501':
             out['color'] = {'found': True, 'service': svc}
+        elif pid:
+            out['depth'] = {'found': True, 'state': state, 'service': svc,
+                            'status': status, 'instance': iid, 'pid': pid,
+                            'match': match_driver('2BC5', pid)}
     out['ok'] = True
     return out
 
@@ -490,10 +498,172 @@ def _payload_path() -> Path | None:
     base = Path(getattr(sys, '_MEIPASS', Path(__file__).resolve().parent))
     cands += [base / 'payload.zip', Path(sys.executable).resolve().parent / 'payload.zip']
     cands += [Path(__file__).resolve().parent / 'payload.zip']
+    # 兜底：构建时若载荷按版本名打入（AstraForge-x.y.z-payload.zip），也能找到
+    try:
+        if base.is_dir():
+            cands += sorted(base.glob('AstraForge-*-payload.zip'))
+    except Exception:
+        pass
     for c in cands:
         if c.exists():
             return c
     return None
+
+
+def _update_url() -> str:
+    """在线更新源：环境变量 AF_UPDATE_URL 优先（测试用），否则内置 DEFAULT_UPDATE_URL。"""
+    return (os.environ.get('AF_UPDATE_URL', '').strip() or DEFAULT_UPDATE_URL).strip()
+
+
+def fetch_update(timeout: float = 4.0) -> dict:
+    """拉 update.json；未配置/网络失败都返回 ok=False（安装器回退本地，不报错）。"""
+    url = _update_url()
+    if not url:
+        return {'ok': False, 'reason': 'not_configured'}
+    try:
+        import urllib.request
+        req = urllib.request.Request(url, headers={'User-Agent': 'AstraForge-Setup'})
+        with urllib.request.urlopen(req, timeout=timeout) as r:
+            data = json.loads(r.read().decode('utf-8'))
+        if not isinstance(data, dict) or not data.get('latest'):
+            return {'ok': False, 'reason': 'bad_json'}
+        return {
+            'ok': True,
+            'latest': str(data.get('latest')),
+            'payload_url': str(data.get('payload_url') or ''),
+            'payload_sha256': str(data.get('payload_sha256') or ''),
+            'min_installer': str(data.get('min_installer') or ''),
+            'notes_url': str(data.get('notes_url') or ''),
+        }
+    except Exception as e:  # noqa: BLE001
+        return {'ok': False, 'reason': 'network', 'msg': f'{type(e).__name__}: {e}'}
+
+
+def download_file(url: str, dest: Path, sha256: str = '', cb=None, cancel=None) -> Path:
+    """流式下载到 dest（先写 .part，校验后改名）。支持 http(s)/file://。"""
+    import hashlib
+    import urllib.request
+
+    dest = Path(dest)
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    cb = cb or (lambda p, s: None)
+    cancel = cancel or (lambda: False)
+    tmp = dest.with_name(dest.name + '.part')
+    h = hashlib.sha256()
+    total = 0
+    try:
+        req = urllib.request.Request(url, headers={'User-Agent': 'AstraForge-Setup'})
+        with urllib.request.urlopen(req, timeout=30) as r, open(tmp, 'wb') as f:
+            try:
+                length = int(r.headers.get('Content-Length') or 0)
+            except Exception:
+                length = 0
+            while True:
+                if cancel():
+                    raise KeyboardInterrupt
+                chunk = r.read(1024 * 1024)
+                if not chunk:
+                    break
+                f.write(chunk)
+                h.update(chunk)
+                total += len(chunk)
+                if length:
+                    cb(min(99, int(total * 100 / max(length, 1))),
+                       f'正在下载安装包… {total // 1048576} / {max(length // 1048576, 1)} MB')
+                else:
+                    cb(50, f'正在下载安装包… {total // 1048576} MB')
+        if sha256 and h.hexdigest().lower() != sha256.lower():
+            raise ValueError('SHA256 校验失败（下载文件不完整或被篡改）')
+        tmp.replace(dest)
+        return dest
+    except Exception:
+        try:
+            tmp.unlink(missing_ok=True)
+        except Exception:
+            pass
+        raise
+
+
+# ---------------------------------------------------------------- 驱动库
+def driver_pack_dir() -> Path | None:
+    """驱动库目录：onefile 的 _MEIPASS/driver_pack → 源码 installer/driver/pack。"""
+    cands = [
+        Path(getattr(sys, '_MEIPASS', Path(__file__).resolve().parent)) / 'driver_pack',
+        Path(__file__).resolve().parent / 'driver' / 'pack',
+        Path(sys.executable).resolve().parent / 'driver_pack',
+    ]
+    for c in cands:
+        try:
+            if (c / 'manifest.json').exists():
+                return c
+        except Exception:
+            pass
+    return None
+
+
+def load_driver_manifest() -> dict:
+    d = driver_pack_dir()
+    if not d:
+        return {}
+    try:
+        return json.loads((d / 'manifest.json').read_text(encoding='utf-8'))
+    except Exception:
+        return {}
+
+
+def match_driver(vid: str, pid: str) -> dict | None:
+    """按 VID/PID 匹配驱动条目。"""
+    vid, pid = (vid or '').upper(), (pid or '').upper()
+    for drv in load_driver_manifest().get('drivers', []):
+        mt = drv.get('match') or {}
+        if str(mt.get('vid', '')).upper() != vid:
+            continue
+        pids = [str(x).upper() for x in (mt.get('pid') or [])]
+        if pid in pids:
+            return drv
+    return None
+
+
+def install_driver(driver_id: str) -> dict:
+    """安装驱动：签名 INF 走 pnputil（必要时 UAC），无签名走 Zadig 引导。"""
+    pack = driver_pack_dir()
+    entry = next((d for d in load_driver_manifest().get('drivers', [])
+                  if d.get('id') == driver_id), None)
+    if not pack or not entry:
+        return {'ok': False, 'msg': f'驱动条目不存在：{driver_id}'}
+    method = str(entry.get('method') or '')
+    files = entry.get('files') or []
+
+    if method == 'pnputil-inf':
+        inf = pack / str(files[0]) if files else None
+        if not inf or not inf.exists():
+            return {'ok': False, 'msg': f'驱动文件缺失：{inf}'}
+        if is_admin():
+            try:
+                r = subprocess.run(['pnputil', '/add-driver', str(inf), '/install'],
+                                   capture_output=True, timeout=180)
+                out = (r.stdout or b'').decode('gbk', errors='replace')
+                ok = r.returncode == 0
+                return {'ok': ok, 'msg': '驱动已安装' if ok else '驱动安装失败（见安装日志）',
+                        'output': out[-800:]}
+            except Exception as e:  # noqa: BLE001
+                return {'ok': False, 'msg': f'pnputil 调用失败：{e}'}
+        # 非管理员：单独提权（只弹 UAC，不开第二个应用窗口）
+        ps = ("Start-Process -FilePath pnputil.exe -ArgumentList "
+              f"'/add-driver','\"{inf}\"','/install' -Verb RunAs -Wait -WindowStyle Hidden")
+        try:
+            subprocess.run(['powershell', '-NoProfile', '-NonInteractive', '-Command', ps],
+                           capture_output=True, timeout=180)
+            return {'ok': True, 'elevated': True,
+                    'msg': '已请求管理员权限；请在系统弹窗确认，完成后点「重新检测」'}
+        except Exception as e:  # noqa: BLE001
+            return {'ok': False, 'msg': f'提权失败：{e}'}
+
+    if method == 'zadig-guided':
+        return {'ok': False, 'guided': True,
+                'msg': '该驱动无签名，请用随包驱动工具按向导安装'}
+
+    return {'ok': False, 'msg': f'未知驱动安装方式：{method}'}
 
 
 def driver_tool_path() -> str:
@@ -503,6 +673,8 @@ def driver_tool_path() -> str:
     cands = [
         exe_dir / '驱动工具' / 'zadig.exe',
         meipass / '驱动工具' / 'zadig.exe',
+        meipass / 'driver_pack' / 'zadig' / 'zadig.exe',
+        Path(__file__).resolve().parent / 'driver' / 'pack' / 'zadig' / 'zadig.exe',
         Path(__file__).resolve().parent / 'driver' / 'zadig.exe',
         exe_dir / 'driver' / 'zadig.exe',
     ]
@@ -552,12 +724,32 @@ def install(opts: dict, cb=None, cancel=None, sb: Sandbox | None = None) -> dict
         cb(pct, text)
         time.sleep(0.15)          # 让 UI 有机会渲染（本地操作很快）
 
-    # 0) 校验
+    # 0) 校验 / 下载
     step(3, '正在校验安装包…')
-    payload = _payload_path()
-    if payload is None:
-        return {'ok': False, 'msg': '找不到载荷 payload.zip（安装包不完整）', 'created': created}
     version = str(opts.get('version') or '0.0.0')
+    downloaded = False
+    if opts.get('payload_url'):
+        version = str(opts.get('latest_version') or version)
+        dest = Path(tempfile.gettempdir()) / 'AstraForge' / f'payload-{version}.zip'
+        step(5, '正在连接更新源…')
+        try:
+            payload = download_file(
+                str(opts['payload_url']), dest,
+                sha256=str(opts.get('payload_sha256') or ''),
+                cb=lambda p, s: cb(5 + int(p * 0.10), s),
+                cancel=cancel)
+            downloaded = True
+        except KeyboardInterrupt:
+            return {'ok': False, 'msg': '已取消下载', 'created': created}
+        except Exception as e:  # noqa: BLE001
+            return {'ok': False, 'msg': f'下载安装包失败：{e}', 'created': created}
+        step(15, '下载完成，正在校验…')
+    else:
+        payload = _payload_path()
+    if payload is None:
+        return {'ok': False,
+                'msg': '本安装包为在线下载器：需要联网获取安装包，或改用离线完整包',
+                'created': created}
 
     # 1) 目录准备（必须是空目录或已有 AstraForge 安装）
     step(8, '正在准备安装位置…')
@@ -588,6 +780,11 @@ def install(opts: dict, cb=None, cancel=None, sb: Sandbox | None = None) -> dict
                 if i % 40 == 0:
                     cb(15 + int(60 * i / total), '正在解压程序文件…')
         cb(75, '正在写入运行时组件…')
+        if downloaded:
+            try:
+                payload.unlink(missing_ok=True)     # 临时下载包用完即删，省空间
+            except Exception:
+                pass
     except KeyboardInterrupt:
         _rollback(created, target)
         return {'ok': False, 'msg': '已取消（回滚完成）', 'created': created}
