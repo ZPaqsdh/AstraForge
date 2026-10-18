@@ -43,7 +43,7 @@
 
 **驱动要求（重要）**：深度相机必须绑定 **WinUSB**（libusb 才能访问）。
 若装过 Orbbec 官方 OpenNI 驱动（obdrv4），两者互斥，需要切换。
-仓库不携带内核驱动；安装器会检测并在冲突时引导使用 [Zadig](https://zadig.akeo.ie/)（GPLv3，`installer/driver/` 自行放置，见该目录 README）。
+仓库不携带内核驱动；安装器会检测并在冲突时引导使用 [Zadig](https://zadig.akeo.ie/)（GPLv3，自行放到 `installer/driver/pack/zadig/`，见该目录 README）。
 
 ## 下载
 
@@ -96,11 +96,19 @@ python build_exe.py
 ### 安装包
 
 ```bat
-:: 先把 zadig.exe 放到 installer/driver/（不入库，见该目录 README）
+:: 先把 zadig.exe 放到 installer/driver/pack/zadig/（不入库，见该目录 README）
 python installer/build_release.py 0.2.10
 ```
 
-产物：`发行/安装器/AstraForge-Setup-v0.2.10/`（入口 exe + 运行时 + `payload.zip`）。
+产物目录 `发行/安装器/AstraForge-Setup-v0.2.10[-时间戳]/`：
+
+| 文件 | 用途 |
+|---|---|
+| `AstraForge-Setup-Online-v0.2.10.exe` | 在线下载器（单文件，安装时拉最新载荷） |
+| `AstraForge-Setup-Offline-v0.2.10.exe` | 离线完整包（单文件，自带本版本载荷） |
+| `AstraForge-0.2.10-payload.zip` | 在线安装用载荷（上传 Release） |
+| `update.json` | OTA 清单（上传 Release，供 `releases/latest/download/update.json` 读取） |
+
 安装器核心自测：`python installer/selftest_core.py`（沙箱，不触碰真实系统）。
 
 ## 架构

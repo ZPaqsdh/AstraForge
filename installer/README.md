@@ -36,7 +36,7 @@
 installer/
 ├── setup_main.py       入口：PySide6 + QtWebEngine + QWebChannel（安装器）
 ├── setup_core.py       核心：环境/目录/解压/快捷方式/注册表/在线下载/驱动匹配
-├── uninstall_main.py   轻量卸载器（tkinter，onefile ≈ 20 MB）
+├── uninstall_main.py   轻量卸载器（tkinter，onefile ≈ 14 MB）
 ├── build_ui.py         草稿 + bridge.js → ui/installer.html
 ├── build_release.py    打 Online / Offline / Uninstaller / payload / update.json
 ├── ui/
