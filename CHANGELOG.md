@@ -21,6 +21,8 @@
 - **采集质量可视化**：新增 `/api/quality` + 前端「采集质量」面板
   （距离条三段色 / 状态灯 / 6×8 覆盖质量色谱叠加）
 - 新增验证探针：`probe63`（内参落地 6 断言）、`probe64`（质量 9 断言）
+- **开源发布（10-18）**：[GitHub 仓库](https://github.com/ZPaqsdh/AstraForge) + Release `v0.2.10`
+  （Online / Offline 安装器、payload、`update.json`）；「关于」页 GitHub Issue/PR 按钮改为直达仓库
 
 ## v0.2.9 — 2026-10-16
 
