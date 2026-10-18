@@ -5,7 +5,7 @@
     AstraForge-Setup-Online-v<版本>.exe     在线下载器（单文件，安装时拉最新载荷）
     AstraForge-Setup-Offline-v<版本>.exe    离线完整包（单文件，自带本版本载荷）
     AstraForge-<版本>-payload.zip           在线安装用的载荷（上传到 GitHub Release，用户无需下载）
-    update.json                             版本清单模板（上传到仓库/Release，填 URL 与 SHA256）
+    update.json                             版本清单（上传到 Release，供在线安装器读取）
     安装器说明.md                            本地说明（不随 exe 分发）
 
 设计：
@@ -163,9 +163,9 @@ def write_meta(payload: Path):
   "app": "AstraForge",
   "latest": "{VERSION}",
   "min_installer": "{VERSION}",
-  "payload_url": "https://github.com/<owner>/<repo>/releases/download/v{VERSION}/AstraForge-{VERSION}-payload.zip",
+  "payload_url": "https://github.com/ZPaqsdh/AstraForge/releases/download/v{VERSION}/AstraForge-{VERSION}-payload.zip",
   "payload_sha256": "{digest}",
-  "notes_url": "https://github.com/<owner>/<repo>/releases/tag/v{VERSION}"
+  "notes_url": "https://github.com/ZPaqsdh/AstraForge/releases/tag/v{VERSION}"
 }}
 """, encoding='utf-8')
     (OUT / '安装器说明.md').write_text(f"""# AstraForge 星铸 · 安装器 v{VERSION}
@@ -177,14 +177,14 @@ def write_meta(payload: Path):
 | `AstraForge-Setup-Online-v{VERSION}.exe` | **在线下载器**（主推）：单文件，安装时联网拉最新载荷 |
 | `AstraForge-Setup-Offline-v{VERSION}.exe` | **离线完整包**：单文件，自带本版本载荷 |
 | `AstraForge-{VERSION}-payload.zip` | 在线安装用的载荷资产（用户不需要手动下载） |
-| `update.json` | 版本清单模板：把 `<owner>/<repo>` 换成实际仓库后上传 |
+| `update.json` | 版本清单（已填实际仓库 URL；上传到 Release） |
 
 ## 上传顺序（GitHub Release）
 
 1. 新建 tag `v{VERSION}` 的 Release；
 2. 上传 `AstraForge-{VERSION}-payload.zip` 与两个安装器 exe；
-3. 修改 `update.json` 里的 `<owner>/<repo>`，上传到仓库根（或 Release）；
-4. 安装器默认读 `DEFAULT_UPDATE_URL`（`installer/setup_core.py`），建仓后填一次即可。
+3. 上传 `update.json`（在线安装器读 `releases/latest/download/update.json`，恒定入口）；
+4. `DEFAULT_UPDATE_URL` 已内置实际仓库地址，无需再改。
 
 ## 用户下载哪个？
 

@@ -56,12 +56,13 @@ installer/
 
 ## 四、在线更新（可选）
 
-`setup_core.DEFAULT_UPDATE_URL` 留空 = 离线模式（不检查、不报错）。建仓后填：
+`setup_core.DEFAULT_UPDATE_URL` 已填为 Release 恒定入口：
 
 ```python
-DEFAULT_UPDATE_URL = 'https://raw.githubusercontent.com/<owner>/<repo>/main/update.json'
+DEFAULT_UPDATE_URL = 'https://github.com/ZPaqsdh/AstraForge/releases/latest/download/update.json'
 ```
 
+因此 `update.json` 必须作为 **Release 资产**上传（`releases/latest/download/update.json` 始终指向最新版）。
 测试时可用 `--update-url <url>` 或环境变量 `AF_UPDATE_URL` 覆盖（支持 `file://`）。
 
 `update.json`：

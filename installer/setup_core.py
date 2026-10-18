@@ -28,10 +28,9 @@ APP_EXE = 'AstraForge.exe'
 UNINST_EXE = 'AstraForge-卸载.exe'
 SM_UNINST_NAME = f'卸载 {APP_CN}.lnk'      # 开始菜单里的「卸载」入口
 PUBLISHER = 'AstraForge 项目'
-URL = 'https://github.com/'          # TODO-002 建仓后填
-# 在线更新源（update.json）。留空 = 离线模式：不检查、不报错。
-# 建仓后填：https://raw.githubusercontent.com/<owner>/<repo>/main/update.json
-DEFAULT_UPDATE_URL = ''
+URL = 'https://github.com/ZPaqsdh/AstraForge'
+# 在线更新源（update.json，Release 资产，始终指向 latest）。留空 = 离线模式。
+DEFAULT_UPDATE_URL = 'https://github.com/ZPaqsdh/AstraForge/releases/latest/download/update.json'
 MIN_CPU = 2
 MIN_RAM_GB = 4
 MIN_DISK_GB = 3.0            # 程序本体 ~0.9GB，留余量
