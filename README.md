@@ -1,10 +1,18 @@
 # AstraForge 星铸
 
+[![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
+[![Platform](https://img.shields.io/badge/platform-Windows%2010%2F11%20x64-0078D6.svg)](#)
+[![Python](https://img.shields.io/badge/python-3.10%2B-3776AB.svg)](requirements.txt)
+[![Version](https://img.shields.io/badge/version-v0.2.10-2ea44f.svg)](CHANGELOG.md)
+[![CI](https://github.com/ZPaqsdh/AstraForge/actions/workflows/ci.yml/badge.svg)](https://github.com/ZPaqsdh/AstraForge/actions/workflows/ci.yml)
+
 **Orbbec Astra 深度相机 3D 扫描工作站**（Windows 桌面应用）
 —— 实时预览 / 点云导出 / 转台多帧融合 / 3D 查看 / 测距 / 模块化热更新。
 
 面向 **Astra S Pro**（USB `2BC5:0403` 深度 + `2BC5:0501` UVC 彩色）实测开发；
 老 Astra 系同栈设备理论上兼容（见「设备支持」）。
+
+[功能](#功能) · [设备支持](#设备支持) · [快速开始](#快速开始) · [架构](#架构) · [测试](#测试) · [已知限制](#已知限制) · [贡献](#贡献)
 
 > 本项目为社区实现，与 Orbbec 无隶属关系。`Orbbec`、`Astra` 为其各自所有者的商标。
 
@@ -37,10 +45,22 @@
 若装过 Orbbec 官方 OpenNI 驱动（obdrv4），两者互斥，需要切换。
 仓库不携带内核驱动；安装器会检测并在冲突时引导使用 [Zadig](https://zadig.akeo.ie/)（GPLv3，`installer/driver/` 自行放置，见该目录 README）。
 
-## 快速开始
+## 下载
+
+安装包与载荷发布在 [Releases](https://github.com/ZPaqsdh/AstraForge/releases)：
+
+| 包 | 适用场景 | 说明 |
+|---|---|---|
+| `AstraForge-Setup-Online-v*.exe` | 有网络 | 单文件在线安装器，安装时拉取最新载荷 |
+| `AstraForge-Setup-Offline-v*.exe` | 离线 / 内网 | 单文件完整包，自带本版本全部载荷 |
+
+> 安装包约 259 MB（Online）/ 601 MB（Offline），均为单 exe，不依赖外挂文件。
+> 首次启动需自解压 20–40 秒。安装后可获得启动器 `AstraForge.exe` 与卸载器。
+
+## 快速开始（源码）
 
 ```bat
-git clone <this-repo> AstraForge
+git clone https://github.com/ZPaqsdh/AstraForge.git
 cd AstraForge
 
 python -m venv .venv
@@ -150,6 +170,14 @@ python tests/probe58_ship_accept.py            :: 发行态验收（需真机）
 - 彩色-深度对齐（D2C）未实现：Astra Pro 的彩色是独立 UVC，只能软件重投影
 - Astra Mini 系列尚未适配
 - 仅 Windows（依赖 WinUSB / QtWebEngine / 串口）
+
+## 贡献
+
+欢迎提交 Issue 与 PR：
+
+- 开始前请阅读 [CONTRIBUTING.md](CONTRIBUTING.md)（开发约定 / 提交规范 / 测试要求）
+- 参与即表示同意遵守 [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md)
+- 安全漏洞请走 [SECURITY.md](SECURITY.md) 的私密通道，不要公开提 Issue
 
 ## 第三方与许可
 

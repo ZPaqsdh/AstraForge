@@ -1,0 +1,54 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  syntax:
+    name: 语法检查 / Python ${{ matrix.python }}
+    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.10", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+
+      - name: 编译全部 Python 源码
+        shell: pwsh
+        run: |
+          python -m compileall -q core modules installer tests shell.py main.py launcher.py build_exe.py
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: 关键模块导入（无设备）
+        shell: pwsh
+        run: |
+          python -c "import core.cloudmath, core.contracts, core.events, core.pipeline, core.theme, core.appsettings; print('core ok')"
+
+  web:
+    name: 前端构建
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ui-web
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: ui-web/package-lock.json
+
+      - run: npm ci --no-audit --no-fund
+      - run: npm run build

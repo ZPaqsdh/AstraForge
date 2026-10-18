@@ -1,0 +1,85 @@
+name: 缺陷报告
+description: 报告可复现的程序错误、崩溃或数据异常
+title: "[Bug] "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        感谢反馈。请先确认已阅读 README 的「已知限制」，并搜索过现有 Issue。
+        涉及**安全漏洞**请勿在此提交，改用 [SECURITY.md](../blob/main/SECURITY.md) 的私密通道。
+  - type: input
+    id: version
+    attributes:
+      label: 版本
+      description: 应用版本 / 提交号（关于页可复制，或 `manifest.json`）
+      placeholder: "v0.2.10 (4a38c57)"
+    validations:
+      required: true
+  - type: dropdown
+    id: install
+    attributes:
+      label: 运行方式
+      options:
+        - 安装包（Online / Offline）
+        - 源码运行（python shell.py）
+        - exe 目录版
+    validations:
+      required: true
+  - type: input
+    id: os
+    attributes:
+      label: 系统环境
+      description: Windows 版本 + Python 版本（源码运行时）
+      placeholder: "Windows 11 23H2 / Python 3.13.14"
+    validations:
+      required: true
+  - type: input
+    id: device
+    attributes:
+      label: 设备与驱动
+      description: 型号、USB VID/PID、当前驱动（WinUSB / obdrv / 未识别）
+      placeholder: "ASTRA S Pro / 2BC5:0403 / WinUSB"
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: 复现步骤
+      description: 从启动到出问题的完整路径，越具体越好
+      placeholder: |
+        1. 打开「采集」页
+        2. 点击「连续采集」
+        3. 约 30 秒后……
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: 期望行为
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: 实际行为
+      description: 含报错文本、弹窗内容；崩溃请附日志
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: 日志 / 截图
+      description: 可直接粘贴文本或拖入图片；日志位于安装目录 `logs/`（如有）
+      render: text
+    validations:
+      required: false
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: 确认
+      options:
+        - label: 我已搜索现有 Issue，未发现重复
+          required: true
+        - label: 我已阅读 README「已知限制」（深度尺度 BUG-017、D2C 未实现等）
+          required: true
