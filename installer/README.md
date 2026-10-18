@@ -72,9 +72,9 @@ DEFAULT_UPDATE_URL = 'https://github.com/ZPaqsdh/AstraForge/releases/latest/down
   "app": "AstraForge",
   "latest": "0.2.10",
   "min_installer": "0.2.10",
-  "payload_url": "https://github.com/<owner>/<repo>/releases/download/v0.2.10/AstraForge-0.2.10-payload.zip",
+  "payload_url": "https://github.com/ZPaqsdh/AstraForge/releases/download/v0.2.10/AstraForge-0.2.10-payload.zip",
   "payload_sha256": "…",
-  "notes_url": ""
+  "notes_url": "https://github.com/ZPaqsdh/AstraForge/releases/tag/v0.2.10"
 }
 ```
 
