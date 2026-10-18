@@ -88,7 +88,7 @@ export default function AboutPage({ app }) {
             <button className="btn" onClick={mailto} style={{ justifyContent: 'flex-start' }}>
               <Mail size={14} /> 邮件反馈（自动附诊断信息）
             </button>
-            <button className="btn" onClick={() => showToast('GitHub 仓库待建立——建立后此处给 Issue/PR 链接')}
+            <button className="btn" onClick={() => window.open('https://github.com/ZPaqsdh/AstraForge/issues/new/choose', '_blank')}
               style={{ justifyContent: 'flex-start' }}>
               <Upload size={14} /> GitHub Issue / PR
             </button>
