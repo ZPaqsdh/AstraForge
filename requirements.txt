@@ -12,7 +12,7 @@ Pillow>=10.0
 scipy>=1.11
 
 # 外设
-pyusb>=1.2          # 深度相机 USB 访问（需 WinUSB 绑定，见 README）
+pyusb>=1.3.1          # 深度相机 USB 访问（需 WinUSB 绑定，见 README）
 pyserial>=3.5       # 转台控制器（可选）
 
 # 深度相机驱动封装（随仓库提供，本地 wheel）
