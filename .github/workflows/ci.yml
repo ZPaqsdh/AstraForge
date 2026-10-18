@@ -30,6 +30,9 @@ jobs:
           python -m compileall -q core modules installer tests shell.py main.py launcher.py build_exe.py
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
+      - name: 安装最小依赖
+        run: python -m pip install --quiet numpy
+
       - name: 关键模块导入（无设备）
         shell: pwsh
         run: |
