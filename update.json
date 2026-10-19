@@ -1,8 +1,8 @@
 {
   "app": "AstraForge",
-  "latest": "0.3.2",
-  "min_installer": "0.3.2",
-  "payload_url": "https://github.com/ZPaqsdh/AstraForge/releases/download/v0.3.2/AstraForge-0.3.2-payload.zip",
-  "payload_sha256": "326acce4caa741ebed40160d84eec4698f2c895f1ee72bea1d7cfda1f9c12ecd",
-  "notes_url": "https://github.com/ZPaqsdh/AstraForge/releases/tag/v0.3.2"
+  "latest": "0.3.3",
+  "min_installer": "0.3.3",
+  "payload_url": "https://github.com/ZPaqsdh/AstraForge/releases/download/v0.3.3/AstraForge-0.3.3-payload.zip",
+  "payload_sha256": "0ca0300b5e976f42c3d4b2e78a074ac3e790e6bcd018bd8488a9386684300284",
+  "notes_url": "https://github.com/ZPaqsdh/AstraForge/releases/tag/v0.3.3"
 }
