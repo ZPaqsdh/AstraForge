@@ -7,9 +7,9 @@
 
 | 文件 | 说明 | 体积（实测） |
 |---|---|---:|
-| `AstraForge-Setup-Online-v0.2.10.exe` | **在线下载器**（主推）：安装时从上游拉最新载荷 | 259 MB |
-| `AstraForge-Setup-Offline-v0.2.10.exe` | **离线完整包**：自带 0.2.10 全部载荷 | 600 MB |
-| `AstraForge-0.2.10-payload.zip` | 在线安装用的载荷资产（上传 Release，用户无需手动下载） | 344 MB |
+| `AstraForge-Setup-Online-v0.3.0.exe` | **在线下载器**（主推）：安装时从上游拉最新载荷 | 259 MB |
+| `AstraForge-Setup-Offline-v0.3.0.exe` | **离线完整包**：自带 0.3.0 全部载荷 | 600 MB |
+| `AstraForge-0.3.0-payload.zip` | 在线安装用的载荷资产（上传 Release，用户无需手动下载） | 344 MB |
 | `update.json` | 版本清单模板（填仓库 URL / SHA256 后上传） | <1 KB |
 
 两个安装器都是 **PyInstaller onefile**：运行时、HTML UI、驱动库全在 exe 内，
@@ -70,11 +70,11 @@ DEFAULT_UPDATE_URL = 'https://github.com/ZPaqsdh/AstraForge/releases/latest/down
 ```json
 {
   "app": "AstraForge",
-  "latest": "0.2.10",
-  "min_installer": "0.2.10",
-  "payload_url": "https://github.com/ZPaqsdh/AstraForge/releases/download/v0.2.10/AstraForge-0.2.10-payload.zip",
+  "latest": "0.3.0",
+  "min_installer": "0.3.0",
+  "payload_url": "https://github.com/ZPaqsdh/AstraForge/releases/download/v0.3.0/AstraForge-0.3.0-payload.zip",
   "payload_sha256": "…",
-  "notes_url": "https://github.com/ZPaqsdh/AstraForge/releases/tag/v0.2.10"
+  "notes_url": "https://github.com/ZPaqsdh/AstraForge/releases/tag/v0.3.0"
 }
 ```
 
@@ -93,9 +93,9 @@ DEFAULT_UPDATE_URL = 'https://github.com/ZPaqsdh/AstraForge/releases/latest/down
 
 ```bat
 python installer/build_ui.py                 :: 生成 ui/installer.html
-python installer/build_release.py 0.2.10     :: 打 Online + Offline + 卸载器 + payload
-python installer/build_release.py 0.2.10 --only online     :: 只打在线版（调试用）
-python installer/build_release.py 0.2.10 --only offline    :: 只打离线版
+python installer/build_release.py 0.3.0     :: 打 Online + Offline + 卸载器 + payload
+python installer/build_release.py 0.3.0 --only online     :: 只打在线版（调试用）
+python installer/build_release.py 0.3.0 --only offline    :: 只打离线版
 ```
 
 构建时间约 7 分钟（两版 + 载荷）；输出到 `发行/安装器/AstraForge-Setup-v<版本>[-时间戳]/`。

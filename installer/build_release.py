@@ -33,7 +33,7 @@ INST = SRC / 'installer'
 RELEASE_APP = WS / '发行' / 'AstraForge'
 OUT_ROOT = WS / '发行' / '安装器'
 _args = sys.argv[1:]
-VERSION = _args[0] if (_args and not _args[0].startswith('--')) else '0.2.10'
+VERSION = _args[0] if (_args and not _args[0].startswith('--')) else '0.3.0'
 ONLY = _args[_args.index('--only') + 1] if '--only' in _args else ''
 TS = time.strftime('%Y%m%d-%H%M%S')
 
