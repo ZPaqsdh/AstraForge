@@ -27,7 +27,7 @@ ROOT = Path(__file__).resolve().parent
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-APP_VERSION = "0.3.0"
+APP_VERSION = "0.3.1"
 
 # 应用级更新源（与 installer/setup_core.py 的 DEFAULT_UPDATE_URL 保持一致；
 # 测试可用 AF_UPDATE_URL 覆盖）。update.json 由 Release 的 latest/download 恒定入口提供。
@@ -54,13 +54,16 @@ _frame_render_lock = threading.Lock()      # 渲染互斥：并发同 kind 请�
 #   （device 模块），预览直出即与出图一致。
 # 「镜像 (M)」= 预览翻面对比开关（显示层，不影响数据）：
 #   开（默认）= 直出（与出图同向）；关 = 显示端左右翻面（对比查看传感器原始向）。
-_preview_mirror = {"on": True}
+_preview_mirror = {"on": False}
 
 
 def _pv_flip(arr):
-    """预览翻面（仅"镜像"开关关闭时生效，用于对比查看）。
-    默认直出（与保存/导出同向）；翻转只作用于显示副本，不改数据数组。"""
-    if arr is None or _preview_mirror["on"]:
+    """预览镜像（仅显示层）：开关打开时左右翻转显示副本，不改数据数组。
+
+    2026-10-19 纠正（BUG-019）：保存/导出/点云/融合一律是正常方向（无镜像）；
+    「镜像」只是给用户预览观察用的显示开关，默认关闭。
+    """
+    if arr is None or not _preview_mirror["on"]:
         return arr
     import numpy as _np
     return _np.ascontiguousarray(arr[:, ::-1])
@@ -840,13 +843,13 @@ class Bridge:
         return {"ok": True, "gray": bool(on)}
 
     def api_set_flip(self, on=True, **kw):
-        """预览镜像（显示层，默认开）：两个预览画面左右翻转显示。
-        只影响画面与悬停/测距取像素；保存帧、导出点云、融合等数据全程不受影响。
+        """预览镜像（显示层，默认关）：打开后两个预览画面左右翻转，便于观察。
+        保存帧、导出点云、融合等数据始终是正常方向（无镜像）。
         自动保存：下次启动还原。"""
         _preview_mirror["on"] = bool(on)
         try:
             from core import appsettings
-            appsettings.update(ROOT / "data", preview_mirror=bool(on))
+            appsettings.update(ROOT / "data", preview_mirror_v2=bool(on))
         except Exception:
             pass
         return {"ok": True, "preview_mirror": bool(on)}
@@ -1137,7 +1140,7 @@ class Bridge:
         mms = cal.get() if cal else 1.0
         cx, cy = cm.cxcy_for_shape(d.shape)      # 尺寸感知主点（BUG-011）
         dw = d.shape[1]
-        back = not _preview_mirror["on"]         # 翻面显示：显示坐标 → 发布坐标
+        back = _preview_mirror["on"]             # 预览镜像：显示坐标 → 数据坐标
         pts = []
         for (xi, yi) in ((int(x1), int(y1)), (int(x2), int(y2))):
             h, w = d.shape
@@ -1600,7 +1603,9 @@ def build_pipeline():
         pm = saved.get("perf_mode")
         if fus is not None and pm in ("std", "perf", "turbo"):
             fus._perf_mode = pm
-        pv = saved.get("preview_mirror")
+        # 旧键 preview_mirror 的语义与现在相反（旧 True=直出/不镜像），
+        # 不再读取；新键 preview_mirror_v2 才表示"预览镜像"。
+        pv = saved.get("preview_mirror_v2")
         if isinstance(pv, bool):
             _preview_mirror["on"] = pv
     except Exception:

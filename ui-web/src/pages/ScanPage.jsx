@@ -591,7 +591,8 @@ export default function ScanPage({ app }) {
                   <button className={gray ? 'on' : ''}
                     title="只切换深度画面为灰度；彩色画面保持彩色"
                     onClick={toggleGray}>深度灰度</button>
-                  <button className={mirror ? 'on' : ''} onClick={toggleMirror}>镜像</button>
+                  <button className={mirror ? 'on' : ''} onClick={toggleMirror}
+                    title="仅镜像预览画面；保存/导出/点云/融合始终是正常方向">预览镜像</button>
                   <button className={paused ? 'on' : ''} onClick={togglePause}>{paused ? '继续' : '暂停'}</button>
                   <span className="af-tool-divider" />
                   <button onClick={() => {

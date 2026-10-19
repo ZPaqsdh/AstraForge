@@ -347,11 +347,11 @@ class RGBThread(threading.Thread):
                              if HAS_CV2 else frame)
             except Exception:
                 frame_rgb = frame
-            # 不翻转（2026-10-16 定案 B）：全链统一"镜像向"（照镜子：人在哪边、
-            # 画面/文件里也在哪边）。RGB 原始读出即镜像向，直发本方向；
-            # 深度端翻一次（DeviceModule.flip=[True]）对齐到同一方向，D2C 取色一致。
-            # 见 问题跟踪/问题跟踪表.md BUG-010。
-            # 注：垃圾区裁剪只在输出端做（core.contracts.crop_for_output），此处不裁。
+            # 方向口径（2026-10-19 纠正，BUG-019）：数据层一律**正常方向（无镜像）**。
+            # UVC 彩色原始读出是镜像向，这里翻一次回到正常方向；深度原始即正常方向，
+            # 不再翻转（DeviceModule.flip=[False]），两路对齐，D2C 取色一致。
+            # 镜像只作为预览观察开关，由 shell.py 的 _pv_flip 在显示层完成。
+            frame_rgb = np.ascontiguousarray(frame_rgb[:, ::-1])
             self.bus.publish("rgb.frame", RgbFrame(data=frame_rgb, t=time.time()))
         if cap is not None:
             cap.release()
@@ -392,13 +392,11 @@ class DeviceModule:
         self.link = None
         self.ctx = None
         self.stop_evt = threading.Event()
-        # 深度水平翻转：默认开启（2026-10-16 用户拍板 B：出图与预览同向）。
-        # 全链统一"镜像向"（照镜子：人在哪边、画面/文件里也在哪边）：
-        #   RGB 端直发原始（readout 即镜像向）＋ 深度端翻一次 flip(rawD) → 两侧同向，
-        #   D2C 像素原样映射保持一致；预览直出（与保存/导出天然一致）。
-        # 见 问题跟踪/问题跟踪表.md BUG-010。
-        # 注：「镜像 (M)」按钮已改为预览翻面对比（显示层，不影响此处数据）。
-        self.flip = [True]
+        # 深度水平翻转：默认关闭（2026-10-19 纠正，BUG-019）。
+        # 数据层口径 = **正常方向（无镜像）**：深度原始即正常方向，不翻；
+        # RGB 原始是镜像向，在 RGBThread 里翻一次回到正常方向 → 两路对齐。
+        # 镜像只作用于预览显示层（shell.py），不影响保存/导出/点云/融合。
+        self.flip = [False]
         self.rgb_index = [DEFAULT_RGB_INDEX]
         self.rgb_exposure = [None]
         self.rgb_res = [None]
@@ -469,7 +467,12 @@ class DeviceModule:
 
     # ---- 对外 API ----
     def set_flip(self, v):
-        self.flip[0] = bool(v)
+        """兼容旧 Tk UI 的接口；数据方向已固定为正常方向，不再翻转数据。
+
+        2026-10-19 纠正（BUG-019）：镜像只是预览显示开关（shell.py），
+        这里必须保持 False，避免任何调用方把保存/导出方向翻掉。
+        """
+        self.flip[0] = False
 
     def get_flip(self):
         return self.flip[0]
