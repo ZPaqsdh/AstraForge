@@ -230,6 +230,8 @@
   pointer-events: none; mix-blend-mode: screen;
 }
 .af-quality-overlay span { border: 1px solid rgba(255,255,255,.10); }
+.af-quality-overlay.gray { mix-blend-mode: normal; }
+.af-quality-overlay.gray span { border-color: rgba(255,255,255,.14); }
 .af-preview-foot { display: flex; align-items: center; gap: 12px; font-size: 11px; color: var(--dim); padding: 0 2px; }
 .af-preview-foot span { display: inline-flex; align-items: center; gap: 4px; }
 .af-foot-spacer { flex: 1; }

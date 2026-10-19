@@ -197,7 +197,7 @@ export default function ScanPage({ state, setState, toast, setPage }) {
               <div className="af-view-toolbar">
                 <div className="af-view-title"><Layers size={14} /><b>预览</b><span>RGB + 深度</span></div>
                 <div className="af-view-actions">
-                  <button className={view.gray ? 'on' : ''} onClick={() => setView({ ...view, gray: !view.gray })}>灰度</button>
+                  <button className={view.gray ? 'on' : ''} title="只切换深度画面为灰度；彩色画面保持彩色" onClick={() => setView({ ...view, gray: !view.gray })}>深度灰度</button>
                   <button className={view.mirror ? 'on' : ''} onClick={() => setView({ ...view, mirror: !view.mirror })}>镜像</button>
                   <button className={view.paused ? 'on' : ''} onClick={() => setView({ ...view, paused: !view.paused })}>{view.paused ? '继续' : '暂停'}</button>
                   <span className="af-tool-divider" />

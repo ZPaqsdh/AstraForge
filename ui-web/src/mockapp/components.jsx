@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import rgbUrl from './assets/rgb.png'
 import depthUrl from './assets/depth.png'
+import depthGrayUrl from './assets/depth-gray.png'
 import {
   ScanLine, Boxes, Settings as SettingsIcon, Info, Usb, RefreshCw, Play, Square,
   Download, FolderOpen, Copy, Mail, GitBranch, Check, AlertTriangle, X, Camera,
@@ -274,12 +275,16 @@ export function QualityPanel({ quality, view, setView, compact = false }) {
   )
 }
 
-export function QualityOverlay({ grid, visible }) {
+export function QualityOverlay({ grid, visible, gray }) {
   if (!visible) return null
   return (
-    <div className="af-quality-overlay" aria-hidden="true">
+    <div className={`af-quality-overlay ${gray ? 'gray' : ''}`} aria-hidden="true">
       {grid.map((v, i) => (
-        <span key={i} style={{ background: `rgba(${v > 0.62 ? '108,203,95' : v > 0.32 ? '232,166,60' : '241,76,76'},${0.16 + v * 0.42})` }} />
+        <span key={i} style={{
+          background: gray
+            ? `rgba(255,255,255,${0.035 + v * 0.16})`
+            : `rgba(${v > 0.62 ? '108,203,95' : v > 0.32 ? '232,166,60' : '241,76,76'},${0.16 + v * 0.42})`,
+        }} />
       ))}
     </div>
   )
@@ -306,7 +311,7 @@ export function PreviewPair({ state, setView, onHover }) {
           <span className="af-frame-meta">640 × 480</span>
         </figcaption>
         <div className="af-frame-body">
-          <img src={rgbUrl} alt="RGB 预览" style={{ filter: gray ? 'grayscale(1)' : 'none', transform: mirror ? 'scaleX(-1)' : 'none' }} />
+          <img src={rgbUrl} alt="RGB 预览" style={{ transform: mirror ? 'scaleX(-1)' : 'none' }} />
           {paused ? <span className="af-paused">已暂停</span> : null}
           <span className="af-live"><i />LIVE</span>
         </div>
@@ -314,11 +319,11 @@ export function PreviewPair({ state, setView, onHover }) {
       <figure className="af-frame">
         <figcaption>
           <span className="af-frame-title">深度 DEPTH</span>
-          <span className="af-frame-meta">619 × 480 · 伪彩</span>
+          <span className="af-frame-meta">619 × 480 · {gray ? '灰度' : '伪彩'}</span>
         </figcaption>
         <div className="af-frame-body" onMouseMove={handleMove} onMouseLeave={() => setHover('')}>
-          <img src={depthUrl} alt="深度预览" style={{ filter: gray ? 'grayscale(1)' : 'none', transform: mirror ? 'scaleX(-1)' : 'none' }} />
-          <QualityOverlay grid={state.quality.grid} visible={state.view.quality} />
+          <img src={gray ? depthGrayUrl : depthUrl} alt="深度预览" style={{ transform: mirror ? 'scaleX(-1)' : 'none' }} />
+          <QualityOverlay grid={state.quality.grid} visible={state.view.quality} gray={gray} />
           {paused ? <span className="af-paused">已暂停</span> : null}
           {hover ? <span className="af-hover">{hover}</span> : null}
         </div>
