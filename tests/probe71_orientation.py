@@ -63,6 +63,41 @@ disp2 = shell._pv_display_depth(raw.copy())
 check("镜像开：显示翻转", np.array_equal(disp2[:, 0], raw[:, -1]))
 shell._preview_mirror["on"] = False
 
+
+# 5) 测距：镜像开/关对同一物理点给出同一距离
+class _FakeRec:
+    last_depth = None
+
+
+class _FakeCal:
+    def get(self):
+        return 1.0
+
+
+_fd = np.tile(np.linspace(900, 1500, 640, dtype=np.float32), (480, 1))
+_fd[:, 40:60] = 1200
+_fd[:, 300:320] = 1300
+_rec = _FakeRec()
+_rec.last_depth = _fd
+
+
+class _FakePipe:
+    def get(self, name):
+        return _rec if name == "recorder" else (_FakeCal() if name == "calib" else None)
+
+
+_b = shell.Bridge(_FakePipe())
+shell._preview_mirror["on"] = False
+_r1 = _b.api_measure(100, 200, 400, 300)
+shell._preview_mirror["on"] = True
+# 显示坐标镜像：x' = (W-1) - x
+_r2 = _b.api_measure(618 - 100, 200, 618 - 400, 300)
+shell._preview_mirror["on"] = False
+_d1 = _r1.get("dist_mm")
+_d2 = _r2.get("dist_mm")
+check("测距：镜像开/关同一点同距离", _d1 is not None and _d2 is not None and abs(_d1 - _d2) < 0.05,
+      f"{_d1} vs {_d2}")
+
 ok = all(x[1] for x in results)
 print("\n===== probe71 结果 =====")
 print(f"{sum(1 for x in results if x[1])}/{len(results)} 通过")
