@@ -100,6 +100,15 @@ python installer/build_release.py 0.3.1 --only offline    :: 只打离线版
 
 构建时间约 7 分钟（两版 + 载荷）；输出到 `发行/安装器/AstraForge-Setup-v<版本>[-时间戳]/`。
 
+构建中途用到 `发行/安装器/_build-<时间戳>/`（载荷暂存 + PyInstaller 工作区，约 1.2–2 GB）。
+打包成功会自动删除；失败时保留便于排查；要主动保留加 `--keep-work`：
+
+```bat
+python installer/build_release.py 0.3.1 --keep-work
+```
+
+只有 `AstraForge-Setup-v<版本>/` 是交付产物，`_build-*` 可随时删。
+
 ## 七、自测
 
 ```bat

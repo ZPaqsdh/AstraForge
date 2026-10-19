@@ -227,6 +227,21 @@ def main():
             print(f'   {p.name:<48} {p.stat().st_size/1024/1024:8.1f} MB  '
                   f'sha256={sha256(p)[:16]}…')
 
+    cleanup_work()
+
+
+def cleanup_work():
+    """删除 PyInstaller 中间目录（载荷暂存 + 工作区，单次约 1.2–2 GB）。
+
+    失败时不会走到这里，目录会保留便于排查；想主动保留加 `--keep-work`。
+    """
+    if '--keep-work' in _args:
+        print('\n中间目录已保留：', WORK)
+        return
+    if WORK.exists():
+        shutil.rmtree(WORK, ignore_errors=True)
+        print('\n已清理中间目录：', WORK.name)
+
 
 if __name__ == '__main__':
     main()
