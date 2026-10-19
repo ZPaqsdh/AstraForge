@@ -36,15 +36,22 @@ shell._preview_mirror["on"] = True
 check("镜像开：_pv_flip 左右翻", np.array_equal(shell._pv_flip(arr), arr[:, ::-1]))
 shell._preview_mirror["on"] = False
 
-# 2) 十字准星随预览镜像
+# 2) 十字准星随预览镜像（方位自适应，BUG-021：裁右 → 主点不左移）
 from core import cloudmath as cm  # noqa: E402
-cx0 = cm.CX - shell._PV_CROP_L
-cx_m = (shell._PV_RAW_W - 1 - shell._PV_CROP_L) - cx0
-check("镜像关：准星用原始主点", shell._pv_crosshair(None)[0] == cx0,
-      f"{shell._pv_crosshair(None)[0]} == {cx0}")
+_l_frame = np.zeros((480, 640), dtype=np.uint16)
+_l_frame[1:, :21] = 1313          # 构造"垃圾带在左"的老帧
+_r_frame = np.zeros((480, 640), dtype=np.uint16)
+_r_frame[1:, -21:] = 1313         # 现行"垃圾带在右"的帧
+_cx_l = cm.CX - shell._PV_CROP_L
+_cx_r = cm.CX
+check("裁右帧：准星 = 主点不左移", shell._pv_crosshair(_r_frame)[0] == _cx_r,
+      f"{shell._pv_crosshair(_r_frame)[0]} == {_cx_r}")
+check("裁左帧：准星 = 主点左移 21", shell._pv_crosshair(_l_frame)[0] == _cx_l,
+      f"{shell._pv_crosshair(_l_frame)[0]} == {_cx_l}")
 shell._preview_mirror["on"] = True
-check("镜像开：准星镜像", shell._pv_crosshair(None)[0] == cx_m,
-      f"{shell._pv_crosshair(None)[0]} == {cx_m}")
+_cx_r_m = (shell._PV_RAW_W - 1 - shell._PV_CROP_L) - _cx_r
+check("镜像开：准星镜像", shell._pv_crosshair(_r_frame)[0] == _cx_r_m,
+      f"{shell._pv_crosshair(_r_frame)[0]} == {_cx_r_m}")
 shell._preview_mirror["on"] = False
 
 # 3) 设备数据方向固定
@@ -53,15 +60,28 @@ check("DeviceModule.flip 默认 False", dev.flip[0] is False)
 dev.set_flip(True)
 check("set_flip(True) 不再翻数据", dev.flip[0] is False)
 
-# 4) 显示层：裁 21 列，镜像才翻转
+# 4) 显示层：按方位裁 21 列，镜像才翻转（BUG-021）
 raw = np.arange(480 * 640, dtype=np.uint32).reshape(480, 640)
+raw[1:, -21:] = 1313                     # 现行右缘垃圾带
 disp = shell._pv_display_depth(raw.copy())
 check("显示裁剪 640→619", disp.shape == (480, 619), str(disp.shape))
-check("镜像关：显示不翻", np.array_equal(disp[:, 0], raw[:, shell._PV_CROP_L]))
+check("裁右帧：保留的是左缘真实数据", disp[0, 0] == raw[0, 0],
+      f"{disp[0, 0]} == {raw[0, 0]}")
+check("裁右帧：右缘垃圾带已切掉",
+      not np.any(disp[1:, -1] == 1313), str(disp[1:, -1].max()))
 shell._preview_mirror["on"] = True
 disp2 = shell._pv_display_depth(raw.copy())
-check("镜像开：显示翻转", np.array_equal(disp2[:, 0], raw[:, -1]))
+check("镜像开：显示翻转", np.array_equal(disp2[:, -1], disp[:, 0]))
 shell._preview_mirror["on"] = False
+
+# 4b) 裁左老帧仍按左裁（方位自适应没退化成写死右边）
+old = np.arange(480 * 640, dtype=np.uint32).reshape(480, 640)
+old[1:, :21] = 1313
+disp_l = shell._pv_display_depth(old.copy())
+check("裁左帧：左缘垃圾带已切掉",
+      not np.any(disp_l[1:, 0] == 1313), str(disp_l[1:, 0].max()))
+check("裁左帧：保留的是右缘真实数据", disp_l[0, -1] == old[0, -1],
+      f"{disp_l[0, -1]} == {old[0, -1]}")
 
 
 # 5) 测距：镜像开/关对同一物理点给出同一距离
@@ -74,7 +94,9 @@ class _FakeCal:
         return 1.0
 
 
-_fd = np.tile(np.linspace(900, 1500, 640, dtype=np.float32), (480, 1))
+_fd = np.tile(np.linspace(900, 1500, 640, dtype=np.float32), (1, 1)).repeat(480, axis=0)
+_fd = _fd.astype(np.uint16)
+_fd[1:, -21:] = 1313              # 现行右缘垃圾带（决定裁剪方位）
 _fd[:, 40:60] = 1200
 _fd[:, 300:320] = 1300
 _rec = _FakeRec()

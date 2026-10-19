@@ -69,47 +69,97 @@ def _pv_flip(arr):
     return _np.ascontiguousarray(arr[:, ::-1])
 
 
-# BUG-009（2026-10-16 查明）：深度数据右缘 21 列（原始方向 619~639）为**固定恒值
-# 1313 垃圾带**（+顶行同类）——跨会话 100% 恒定，非场景内容、非本次改动引入。
-# 口径（用户定案）：**显示端保持原画幅不变**（仅预览端裁掉左缘 21 列垃圾，见下方
-# `_pv_display_depth`）；**固定垃圾区与 RGB 匹配裁剪只在输出端做**（core.contracts.
-# crop_for_output → 保存/导出文件 619×479 等尺寸）。
+# BUG-009（2026-10-16 查明）：深度原始输出含**固定垃圾带**（恒值 1313）：顶行 + 某侧缘
+# 21 列，跨会话 100% 恒定，非场景内容。
+# 口径（用户定案）：**显示端也要裁掉它**（否则预览上就是一条亮色竖条，BUG-021），
+# 输出端同规格（core.contracts.crop_for_output → 保存/导出文件 619×479）。
+# **方位按帧自适应**（BUG-012）：垃圾带可能在某侧——`detect_garbage_side` 判向，
+# 严禁写死左/右（v0.3.1 改方向后方位变了，写死左边直接踩坑，见 BUG-021）。
 _PV_CROP_L = 21
 _PV_RAW_W = 640          # 原始深度宽度（裁剪前）
 
 
+def _pv_crop_side(d):
+    """垃圾带方位（'L'/'R'）——按帧自适应，检测不出时按当前数据方位兜底 'R'。
+
+    BUG-021（2026-10-20）：v0.3.1 把数据方向改成"正常方向（无镜像）"后，深度不再翻转，
+    垃圾带随之落到**右缘**；而预览仍硬编码裁左 21 列 → 真实数据被裁掉、右缘 21 列垃圾
+    （恒值 1313 → LUT 亮绿）留在画面上，即用户看到的"多出一条没有内容的竖线"。
+    probe72 实测：左缘恒值占比 0.000 / 右缘 1.000 → side='R'。
+
+    兜底 'R' 的理由：**画幅必须恒为 619 宽**（前端坐标/内参/测距都按 619 算）。
+    场景太平坦导致 detect 判不出时，若原样不裁，画幅会在 640/619 之间跳，坐标立刻漂。
+    当前数据方位（不翻转）就是 R，故兜底 R；老 L 帧有强垃圾带特征，一定判得出来。
+    """
+    if d is None or getattr(d, "ndim", 0) != 2 or d.shape[1] != _PV_RAW_W:
+        return None
+    try:
+        from core.contracts import detect_garbage_side
+        return detect_garbage_side(d) or 'R'
+    except Exception:
+        return 'R'
+
+
 def _pv_display_depth(d):
-    """预览用深度：裁掉固定垃圾带（发布方向左缘 21 列）→ 清边缘幻影列
-    （BUG-013：传感器最外列伪数据，发布向下位于最右缘）→ 按镜像开关翻面。
-    仅作用于显示副本，数据数组不改；坐标（悬停/测距）与屏幕所见 1:1 对应。"""
-    if d is None:
+    """预览用深度：清顶行垃圾 → 按方位裁掉侧缘垃圾带 21 列 → 清边缘幻影列
+    → 按镜像开关翻面。
+
+    仅作用于显示副本，数据数组不改；坐标（悬停/测距/准星）与屏幕所见 1:1 对应。
+
+    - 顶行：整行恒值 1313（BUG-009），**清为无效而不裁**——保持 480 高，
+      cy 不平移，避免内参级联（BUG-011 的坑）；1px 深线肉眼不可见。
+    - 侧缘：裁 21 列，方位自适应（`_pv_crop_side`，BUG-021）。
+    - 幻影列：两侧都查（BUG-013），清该列为无效，不再裁。
+    """
+    if d is None or getattr(d, "ndim", 0) != 2:
         return d
-    if d.ndim == 2 and d.shape[1] == 640:
-        import numpy as _np
-        d = _np.ascontiguousarray(d[:, _PV_CROP_L:])
-    if d.ndim == 2 and d.shape[1] == 619:
-        try:
-            from core.contracts import detect_phantom_side
-            ph = detect_phantom_side(d)
-            if ph is not None:
-                import numpy as _np
-                d = d.copy()
-                if ph == 'R':
-                    d[:, -1] = 0
-                else:
-                    d[:, 0] = 0
-        except Exception:
-            pass
+    import numpy as _np
+    d = _np.asarray(d)
+    from core.contracts import CROP_COL0, detect_garbage_side, detect_phantom_side
+
+    if d.shape[1] == _PV_RAW_W:
+        side = _pv_crop_side(d)
+        if side == 'L':
+            d = _np.ascontiguousarray(d[:, CROP_COL0:])
+        elif side == 'R':
+            d = _np.ascontiguousarray(d[:, :-CROP_COL0])
+        else:
+            d = _np.ascontiguousarray(d)
+
+    if d.shape[1] == _PV_RAW_W - CROP_COL0:
+        ph = detect_phantom_side(d)
+        if ph is not None or _pv_top_garbage(d):
+            d = d.copy()
+            if ph == 'R':
+                d[:, -1] = 0
+            elif ph == 'L':
+                d[:, 0] = 0
+            if _pv_top_garbage(d):
+                d[0, :] = 0
     return _pv_flip(d)
 
 
+def _pv_top_garbage(d):
+    """顶行是否整行垃圾（恒值 1313 占绝大多数）——设备级特征，跨会话恒定。"""
+    try:
+        from core.contracts import _GARBAGE_V
+        return float((d[0, :] == _GARBAGE_V).mean()) > 0.6
+    except Exception:
+        return False
+
+
 def _pv_crosshair(depth):
-    """十字准星位置（显示坐标）：光轴（出厂主点 CX/CY，BUG-015）映射到显示画幅
-    （裁 21 列后的坐标；显示端不裁行 → cy 不平移）。"""
+    """十字准星位置（显示坐标）：光轴（出厂主点 CX/CY，BUG-015）映射到显示画幅。
+
+    裁左 → 主点左移 21；裁右 → 主点不动（col0=0）。显示端不裁行 → cy 不平移。
+    """
     from core import cloudmath as _cm
-    cx0 = _cm.CX - _PV_CROP_L
-    cx = ((_PV_RAW_W - 1 - _PV_CROP_L) - cx0) if _preview_mirror["on"] else cx0
-    return (cx, _cm.CY)
+    side = _pv_crop_side(depth)
+    col0 = _PV_CROP_L if side == 'L' else 0
+    cx0 = _cm.CX - col0
+    if _preview_mirror["on"]:
+        cx0 = ((_PV_RAW_W - _PV_CROP_L - 1) - cx0)
+    return (cx0, _cm.CY)
 
 
 # ---------------- 采集质量可视化（TODO-016） ----------------
@@ -615,7 +665,7 @@ class Bridge:
         return ("__jpeg__", data)
 
     def api_pixel(self, x=0, y=0):
-        """深度画布悬停查值（shift → mm）。取像素用显示层画面（裁垃圾带+镜像）——
+        """深度画布悬停查值（shift → mm）。取像素用显示层画面（按方位裁垃圾带+镜像）——
         与屏幕上看到的图 1:1 对应（镜像/裁剪变化时查询位置不漂移）。"""
         rec = self._m("recorder")
         cal = self._m("calib")
@@ -1136,9 +1186,14 @@ class Bridge:
             return {"ok": False, "error": "还没有画面"}
         import numpy as np
         from core import cloudmath as cm
-        d = _pv_display_depth(rec.last_depth)
+        raw = rec.last_depth
+        d = _pv_display_depth(raw)
         mms = cal.get() if cal else 1.0
-        cx, cy = cm.cxcy_for_shape(d.shape)      # 尺寸感知主点（BUG-011）
+        # 主点按**真实裁剪方位**取（BUG-021）：裁左 → col0=21；裁右 → col0=0。
+        col0 = 0
+        if raw is not None and getattr(raw, "ndim", 0) == 2 and raw.shape[1] == _PV_RAW_W:
+            col0 = _PV_CROP_L if _pv_crop_side(raw) == 'L' else 0
+        cx, cy = cm.cxcy_for_shape(d.shape, col0=col0)   # 尺寸感知主点（BUG-011）
         dw = d.shape[1]
         back = _preview_mirror["on"]             # 预览镜像：显示坐标 → 数据坐标
         pts = []
