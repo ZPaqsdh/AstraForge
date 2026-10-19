@@ -202,8 +202,17 @@
   position: relative; min-height: 0; flex: none; aspect-ratio: 4 / 3;
   display: flex; align-items: center; justify-content: center;
   background: #0d0f12; border: 1px solid var(--border); border-radius: 9px; overflow: hidden;
+  /* 画面区独立绘制：换帧/切灰度/开关色谱时整块重画，
+     不把旧帧的残片漏到卡片右缘（QtWebEngine 局部重绘残影，BUG-020）。 */
+  contain: paint;
+  isolation: isolate;
 }
-.af-frame-body img { width: 100%; height: 100%; object-fit: fill; display: block; }
+.af-frame-body img {
+  width: 100%; height: 100%; object-fit: fill; display: block;
+  /* 单独合成层：每次换图整层替换，避免边角留下上一帧的竖条 */
+  transform: translateZ(0);
+  backface-visibility: hidden;
+}
 .af-preview-pair { min-height: 280px; }
 .af-live {
   position: absolute; left: 8px; top: 8px;
@@ -236,7 +245,7 @@
 .af-preview-foot span { display: inline-flex; align-items: center; gap: 4px; }
 .af-foot-spacer { flex: 1; }
 
-.af-control-panel { min-height: 0; overflow: auto; display: flex; flex-direction: column; gap: 10px; padding-right: 2px; }
+.af-control-panel { min-height: 0; overflow: auto; display: flex; flex-direction: column; gap: 10px; padding-right: 2px; scrollbar-gutter: stable; }
 .af-section { background: var(--card); border: 1px solid var(--border); border-radius: 11px; padding: 11px; }
 .af-section-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 9px; }
 .af-section-head h3 { font-size: 12.5px; font-weight: 500; }
@@ -363,7 +372,7 @@
 .af-panel-head { display: flex; align-items: center; justify-content: space-between; padding: 11px; border-bottom: 1px solid var(--border); }
 .af-panel-head h3 { font-size: 12.5px; font-weight: 500; }
 .af-panel-head span { font-size: 10.5px; color: var(--dim); margin-left: 6px; }
-.af-session-list { flex: 1; min-height: 0; overflow: auto; padding: 7px; display: flex; flex-direction: column; gap: 5px; }
+.af-session-list { flex: 1; min-height: 0; overflow: auto; padding: 7px; display: flex; flex-direction: column; gap: 5px; scrollbar-gutter: stable; }
 .af-session {
   display: flex; align-items: center; gap: 8px; width: 100%; text-align: left;
   border: 1px solid transparent; background: transparent; color: var(--fg);

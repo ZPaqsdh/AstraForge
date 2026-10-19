@@ -42,7 +42,7 @@ export function FrameImg({ kind, gray, intervalMs = 25, paused = false, onFrame,
   }
   return (
     <img src={src} alt={kind} onLoad={done} onError={done}
-      style={{ display: 'block', borderRadius: 9, ...style }} {...rest} />
+      style={{ display: 'block', ...style }} {...rest} />
   )
 }
 
