@@ -231,16 +231,23 @@ def main():
 
 
 def cleanup_work():
-    """删除 PyInstaller 中间目录（载荷暂存 + 工作区，单次约 1.2–2 GB）。
+    """删除 PyInstaller 中间目录（载荷暂存 + 工作区，单次约 1.2–3 GB）。
 
     失败时不会走到这里，目录会保留便于排查；想主动保留加 `--keep-work`。
+    注意：某些环境的安全策略会拦批量删除（>50 文件），此时**不报错退出**，
+    只提示手动删除——构建产物已生成，不能因为清理失败判构建失败。
     """
     if '--keep-work' in _args:
         print('\n中间目录已保留：', WORK)
         return
-    if WORK.exists():
-        shutil.rmtree(WORK, ignore_errors=True)
+    if not WORK.exists():
+        return
+    try:
+        shutil.rmtree(WORK)
         print('\n已清理中间目录：', WORK.name)
+    except Exception as e:
+        print(f'\n[warn] 中间目录未能自动删除（{str(e)[:80]}）')
+        print(f'       请手动删除：{WORK}')
 
 
 if __name__ == '__main__':
