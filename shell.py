@@ -1416,9 +1416,12 @@ class Bridge:
             return dict(self._upd)
 
     def api_update_apply(self, **kw):
-        """退出应用后由 PowerShell 覆盖 payload 并重启（仅已安装布局可用）。
+        """把已下载的 payload 写入安装目录，然后尝试自动重启。
 
-        payload.zip 的根就是安装目录（AstraForge.exe + code/ + _internal/ …）。
+        先在本进程内解压覆盖 `code/` 与根文档（Windows 允许覆盖运行中的 .py /
+        静态资源），这样即使重启脚本被安全软件拦下，更新文件也已经落盘；
+        `AstraForge.exe / _internal` 正在运行、可能被锁，失败则跳过并提示用安装器。
+        用户设置与日志不覆盖。
         """
         with self._upd_lock:
             st = dict(self._upd)
@@ -1431,30 +1434,73 @@ class Bridge:
         zip_path = Path(st.get("path") or "")
         if not zip_path.exists():
             return {"ok": False, "error": "更新包不存在，请重新下载"}
-        script = Path(tempfile.gettempdir()) / "AstraForge" / "apply_update.ps1"
+
+        replaced, skipped = 0, []
+        skip_names = {"code/data/设置.json", "code/data/标定.json",
+                      "code/shell_web.log"}
+        try:
+            import shutil
+            import zipfile
+            base = install.resolve()
+            with zipfile.ZipFile(zip_path) as z:
+                for info in z.infolist():
+                    name = info.filename
+                    if not name or name.endswith("/") or name in skip_names:
+                        continue
+                    target = (install / name).resolve()
+                    if target != base and base not in target.parents:
+                        continue
+                    target.parent.mkdir(parents=True, exist_ok=True)
+                    try:
+                        with z.open(info) as src, open(target, "wb") as dst:
+                            shutil.copyfileobj(src, dst)
+                        replaced += 1
+                    except (PermissionError, OSError):
+                        skipped.append(name)
+        except Exception as e:
+            return {"ok": False, "error": f"写入更新失败：{str(e)[:120]}"}
+
+        if not replaced:
+            return {"ok": False, "error": "没有可写入的文件（更新包结构异常）",
+                    "skipped": skipped[:20]}
+
+        # 更新安装清单版本
+        try:
+            ij = install / "install.json"
+            data = json.loads(ij.read_text(encoding="utf-8")) if ij.exists() else {}
+            data["version"] = st.get("latest") or data.get("version", "")
+            data["updated_at"] = time.strftime("%Y-%m-%d %H:%M:%S")
+            ij.write_text(json.dumps(data, ensure_ascii=False, indent=2),
+                          encoding="utf-8")
+        except Exception:
+            pass
+
+        # 重启脚本：只负责拉起新进程（文件已在本进程内写好）
+        script = Path(tempfile.gettempdir()) / "AstraForge" / "restart_app.ps1"
         script.parent.mkdir(parents=True, exist_ok=True)
-        ps = (
-            "Start-Sleep -Seconds 2\n"
-            "Get-Process AstraForge -ErrorAction SilentlyContinue | "
-            "Stop-Process -Force -ErrorAction SilentlyContinue\n"
-            f"Expand-Archive -LiteralPath '{zip_path}' -DestinationPath "
-            f"'{install}' -Force\n"
-            f"Start-Process -FilePath '{exe}'\n"
-        )
+        ps = (f"Start-Sleep -Seconds 2\n"
+              f"Start-Process -FilePath '{exe}'\n")
         try:
             script.write_text(ps, encoding="utf-8-sig")
             subprocess.Popen(
                 ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass",
                  "-WindowStyle", "Hidden", "-File", str(script)],
-                close_fds=True, creationflags=0x08000000 | 0x00000008)
-        except Exception as e:
-            return {"ok": False, "error": f"无法启动更新脚本：{str(e)[:100]}"}
+                close_fds=True,
+                stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                creationflags=0x00000008 | 0x00000200)
+        except Exception:
+            pass  # 文件已更新，重启可手动完成
 
         def _bye():
             time.sleep(1.0)
             os._exit(0)
         threading.Thread(target=_bye, daemon=True, name="app-update-exit").start()
-        return {"ok": True, "msg": "正在退出并替换程序文件…"}
+        need_installer = any(s.startswith(("AstraForge.exe", "_internal", "驱动工具"))
+                             for s in skipped)
+        return {"ok": True, "replaced": replaced,
+                "skipped": skipped[:20], "needs_installer": need_installer,
+                "msg": "更新已写入，正在重启应用…"}
 
     # ---------- 心跳（窗口存活判定：Edge 多进程模型下 proc.wait 不可靠） ----------
     _beat = {"last": 0.0, "got": False}

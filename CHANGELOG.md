@@ -7,7 +7,7 @@
 - **三维扫描**：设备扫描/连接/断开 6 状态；实时采集、手持扫描、转台扫描共用一套预览、
   质量面板与视图工具（深度灰度 / 镜像 / 暂停 / 测距 / 标定 / 色带）
 - **融合工作台**：真实会话列表、融合阶段进度、取消、产物列表与 `fused_preview.png` 预览
-- **关于与更新**：`update.json` 检查 → 下载 → SHA-256 校验 → 退出后替换并重启；
+- **关于与更新**：`update.json` 检查 → 下载 → SHA-256 校验 → 写入更新文件后自动重启（运行时文件被占用时提示用安装器）；
   5 条更新日志、安装与驱动信息、诊断复制、GitHub Issue 预填
 - 后端新增：`device_scan` / `device_connect` / `device_disconnect` / `paths` /
   `artifact` / `update_check` / `update_download` / `update_status` / `update_apply`

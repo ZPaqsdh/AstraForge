@@ -123,7 +123,9 @@ function UpdateCard({ app, onChanged }) {
     try {
       const r = await api.updateApply()
       if (!r.ok) throw new Error(r.error || '无法启动更新')
-      showToast('正在退出并替换程序文件，随后自动重启…', 8000)
+      showToast(r.needs_installer
+        ? '更新已写入；部分运行时文件被占用，若启动异常请用安装器覆盖'
+        : '更新已写入，正在重启应用…', 8000)
     } catch (e) {
       showToast(`✗ ${e.message || e}`, 5000)
     }
@@ -200,7 +202,7 @@ function UpdateCard({ app, onChanged }) {
                   .catch((e) => showToast(e.message))}>打开更新包位置</Btn>
             )}
             <span className="af-hint">
-              {info?.can_apply ? '点击后应用会退出，替换完成后自动重启'
+              {info?.can_apply ? '点击后写入更新并自动重启；运行时文件被占用时会提示'
                 : '开发目录不能自动覆盖；请用安装器更新'}
             </span>
           </div>
