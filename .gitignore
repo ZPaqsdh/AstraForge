@@ -13,6 +13,7 @@ _tmp/
 # ---------- 前端 ----------
 ui-web/node_modules/
 # 注意：ui-web/dist 故意入库 —— 用户不装 Node 也能直接 python shell.py 运行
+ui-web/dist-mock/
 
 # ---------- 构建产物 ----------
 build/

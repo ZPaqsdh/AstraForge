@@ -87,6 +87,18 @@ npm install
 npm run build        :: 输出到 ui-web/dist，被 shell.py 直接托管
 ```
 
+### UI 复刻台（假数据，不接硬件）
+
+改 UI 前先用复刻台试，不需要相机 / Python：
+
+```bat
+cd ui-web
+npm run dev:mock     :: 打开 http://127.0.0.1:5199/mock.html
+npm run build:mock   :: 静态版输出到 ui-web/dist-mock/
+```
+
+说明见 `ui-web/README-复刻台.md`。复刻台只打包 `mock.html`，不进入正式 `dist`。
+
 ### 单文件/目录版 exe
 
 ```bat

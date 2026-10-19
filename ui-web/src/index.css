@@ -1,4 +1,5 @@
 @import "tailwindcss";
+@source not "../src/mockapp";
 
 :root {
   --bg: #181818;
