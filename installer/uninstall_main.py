@@ -22,7 +22,7 @@ import threading
 import time
 from pathlib import Path
 
-APP_VERSION = '0.3.1'
+APP_VERSION = '0.3.2'
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 

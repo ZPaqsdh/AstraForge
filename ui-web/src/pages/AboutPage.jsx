@@ -8,11 +8,11 @@ import { Btn, Section, Modal, Pill, Field } from '../ui.jsx'
 import { api } from '../api.js'
 
 const UPDATE_LOG = [
+  { version: 'v0.3.2', date: '2026-10-19', note: '预览残影修复、滚动条不再挤动版面' },
+  { version: 'v0.3.1', date: '2026-10-19', note: '成像方向纠正：导出无镜像，镜像只影响预览' },
+  { version: 'v0.3.0', date: '2026-10-19', note: '四导航 UI 重做、应用内更新与反馈' },
   { version: '安装器 v4', date: '2026-10-18', note: '单文件双形态、驱动库、轻量卸载器' },
   { version: 'v0.2.10', date: '2026-10-16', note: '出厂标定、采集质量可视化' },
-  { version: 'v0.2.9', date: '2026-10-16', note: '方向链统一、设置持久化、4 项修复' },
-  { version: 'v0.2.0', date: '2026-10-14', note: 'React UI、模块化管线' },
-  { version: 'v0.1.0', date: '2026-10-12', note: 'USB 协议复活、首版' },
 ]
 
 const GH = 'https://github.com/ZPaqsdh/AstraForge'

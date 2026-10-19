@@ -3,7 +3,7 @@
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 [![Platform](https://img.shields.io/badge/platform-Windows%2010%2F11%20x64-0078D6.svg)](#)
 [![Python](https://img.shields.io/badge/python-3.10%2B-3776AB.svg)](requirements.txt)
-[![Version](https://img.shields.io/badge/version-v0.3.1-2ea44f.svg)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-v0.3.2-2ea44f.svg)](CHANGELOG.md)
 [![CI](https://github.com/ZPaqsdh/AstraForge/actions/workflows/ci.yml/badge.svg)](https://github.com/ZPaqsdh/AstraForge/actions/workflows/ci.yml)
 
 **Orbbec Astra 深度相机 3D 扫描工作站**（Windows 桌面应用）
@@ -112,16 +112,16 @@ python build_exe.py
 
 ```bat
 :: 先把 zadig.exe 放到 installer/driver/pack/zadig/（不入库，见该目录 README）
-python installer/build_release.py 0.3.1
+python installer/build_release.py 0.3.2
 ```
 
-产物目录 `发行/安装器/AstraForge-Setup-v0.3.1[-时间戳]/`：
+产物目录 `发行/安装器/AstraForge-Setup-v0.3.2[-时间戳]/`：
 
 | 文件 | 用途 |
 |---|---|
-| `AstraForge-Setup-Online-v0.3.1.exe` | 在线下载器（单文件，安装时拉最新载荷） |
-| `AstraForge-Setup-Offline-v0.3.1.exe` | 离线完整包（单文件，自带本版本载荷） |
-| `AstraForge-0.3.1-payload.zip` | 在线安装用载荷（上传 Release） |
+| `AstraForge-Setup-Online-v0.3.2.exe` | 在线下载器（单文件，安装时拉最新载荷） |
+| `AstraForge-Setup-Offline-v0.3.2.exe` | 离线完整包（单文件，自带本版本载荷） |
+| `AstraForge-0.3.2-payload.zip` | 在线安装用载荷（上传 Release） |
 | `update.json` | OTA 清单（上传 Release，供 `releases/latest/download/update.json` 读取） |
 
 安装器核心自测：`python installer/selftest_core.py`（沙箱，不触碰真实系统）。
