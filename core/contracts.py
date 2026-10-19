@@ -133,6 +133,74 @@ def detect_garbage_side(dep):
     return None
 
 
+# ---- 边缘低可信列（BUG-022，2026-10-20 实测）----
+# 现象：导出点云左右两侧各有一层"薄片"，正视图看不见（与轮廓重合），旋转 90° 才看见
+#       —— 用户描述为"红外溅射颗粒垃圾"。
+# 实测（真机 479×619 帧）：越靠近视场左右边缘，**有效率骤降 + 深度系统性偏近**：
+#   左缘 c1..56   有效率 6–16%，中位 1070–1096（比主体 1179 近约 100mm）
+#   右缘 c592..610 有效率 44%→2%，中位 1112→1000（近 70–180mm）
+# 成因：ToF 在视场边缘 IR 强度与镜头照度下降 → 相位解算不可靠，深度被拉近。
+# 处置：**清零不清画幅**（宽高不变 → 内参/主点不级联），保证 619 宽与 479 高。
+_EDGE_FILL_MIN = 0.35        # 列有效率低于此值视为稀疏（真几何列通常 >0.8）
+_EDGE_BIAS_MM = 25.0         # 列中位深度比主体近超过此值视为边缘偏近
+                             # （实测边缘列偏近 70–180mm；留余量取 25，避免误伤同深度稀疏列）
+_EDGE_MAX_RATIO = 0.25       # 单侧最多清零 25% 宽度（防误伤满幅场景）
+
+
+def trim_unreliable_edges(dep):
+    """清掉视场左右边缘的**低可信列**（BUG-022）：有效稀疏 + 深度系统性偏近。
+
+    只清列不清画幅——返回同形状数组，被清列整列置 0（无效）。
+    判定（两侧独立，从最外侧向内连续判定，遇到可靠列即停）：
+      · 该列有效率 < _EDGE_FILL_MIN
+      · 且（无有效点 或 中位深度比"主体中位"近 > _EDGE_BIAS_MM）
+    主体中位：取画面中间 50% 列的有效深度中位（抗边缘污染）。
+
+    保守性：只在**边缘连续段**生效，遇到第一个可靠列立刻停止；单侧上限 25% 宽。
+    满幅真实场景（边缘也是实物、有效率高）不会被裁。
+    """
+    import numpy as np
+    if dep is None or getattr(dep, "ndim", None) != 2 or dep.size == 0:
+        return dep
+    H, W = dep.shape
+    if W < 100:
+        return dep
+    d = np.asarray(dep)
+    valid = d > 0
+    fill = valid.mean(axis=0)
+
+    c0, c1 = int(W * 0.25), int(W * 0.75)
+    body_vals = d[:, c0:c1][valid[:, c0:c1]]
+    if body_vals.size < 200:
+        return dep
+    body_med = float(np.median(body_vals))
+
+    cap = max(1, int(W * _EDGE_MAX_RATIO))
+
+    def bad(c):
+        if fill[c] >= _EDGE_FILL_MIN:
+            return False
+        if not valid[:, c].any():
+            return True                      # 空列：清零无副作用
+        return (body_med - float(np.median(d[valid[:, c], c]))) > _EDGE_BIAS_MM
+
+    left = 0
+    while left < cap and bad(left):
+        left += 1
+    right = 0
+    while right < cap and bad(W - 1 - right):
+        right += 1
+
+    if not left and not right:
+        return dep
+    out = d.copy()
+    if left:
+        out[:, :left] = 0
+    if right:
+        out[:, W - right:] = 0
+    return out
+
+
 def crop_for_output(dep=None, rgb=None):
     """输出端裁剪（保存/导出/融合用；显示端不用）。返回 (dep', rgb')，None 原样返回。
 
@@ -143,6 +211,10 @@ def crop_for_output(dep=None, rgb=None):
     边缘幻影列（BUG-013）：裁剪后标准画幅（479×619）上再检测"边缘幻影列"
     （传感器最外列伪数据：整列满有效、内邻缺失时仍出数）→ 清为无效。
     画幅与内参不变（619 宽不动），只是该列不再进 PNG/PLY/融合。
+
+    边缘低可信列（BUG-022）：裁完垃圾带后再清左右两侧"稀疏 + 深度偏近"的列
+    （ToF 视场边缘 IR 衰减）——不清画幅，只把整列置无效；否则导出点云两侧会留下
+    一层贴边薄片（正视图看不见、转 90° 才现形的"颗粒垃圾"）。
 
     注意：裁剪改变帧尺寸后，**反投影消费方必须同步主点**——点云/融合/测距
     统一走 `cloudmath.cxcy_for_shape(shape, col0=...)` 按裁剪量取主点（BUG-011），
@@ -172,4 +244,9 @@ def crop_for_output(dep=None, rgb=None):
                 dep[:, 0] = 0
         except Exception:
             pass
+    # BUG-022：左右边缘低可信列（稀疏 + 深度偏近）→ 整列清无效（不清画幅）
+    try:
+        dep = trim_unreliable_edges(dep)
+    except Exception:
+        pass
     return dep, rgb

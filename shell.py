@@ -27,7 +27,7 @@ ROOT = Path(__file__).resolve().parent
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-APP_VERSION = "0.3.2"
+APP_VERSION = "0.3.3"
 
 # 应用级更新源（与 installer/setup_core.py 的 DEFAULT_UPDATE_URL 保持一致；
 # 测试可用 AF_UPDATE_URL 覆盖）。update.json 由 Release 的 latest/download 恒定入口提供。
