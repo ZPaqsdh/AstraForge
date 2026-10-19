@@ -1,42 +1,39 @@
-import {
-  Camera, ScanLine, RotateCw, Sparkles, Wrench, SlidersHorizontal, Info,
-} from 'lucide-react'
+import { ScanLine, Boxes, SlidersHorizontal, Info, ChevronRight } from 'lucide-react'
 
 export const NAV = [
-  { id: 'capture', label: '采集', icon: Camera, section: '工作区' },
-  { id: 'scan3d', label: '3D 扫描', icon: ScanLine },
-  { id: 'turntable', label: '转台', icon: RotateCw },
-  { id: 'fusion', label: '融合', icon: Sparkles },
-  { id: 'toolbox', label: '工具箱', icon: Wrench, section: '工具' },
-  { id: 'settings', label: '设置', icon: SlidersHorizontal },
-  { id: 'about', label: '关于', icon: Info },
+  { id: 'scan', label: '三维扫描', hint: '设备 · 采集 · 建模', icon: ScanLine },
+  { id: 'fusion', label: '融合工作台', hint: '会话 · 融合 · 产物', icon: Boxes },
+  { id: 'settings', label: '设置', hint: '导出 · 性能 · 外观', icon: SlidersHorizontal },
+  { id: 'about', label: '关于与更新', hint: '版本 · 驱动 · 反馈', icon: Info },
 ]
 
 export default function Sidebar({ active, onChange }) {
   return (
-    <nav
-      className="shrink-0 overflow-y-auto"
-      style={{
-        width: 148, background: 'var(--panel)', borderRight: '1px solid var(--border)',
-        padding: '8px 6px',
-      }}
-    >
-      {NAV.map((it) => (
-        <div key={it.id}>
-          {it.section && (
-            <div style={{ fontSize: 10.5, color: 'var(--dim)', padding: '12px 10px 4px', letterSpacing: 0.8 }}>
-              {it.section}
-            </div>
-          )}
-          <button
-            className={`nav-item${active === it.id ? ' active' : ''}`}
-            onClick={() => onChange(it.id)}
-          >
-            <it.icon size={16} />
-            {it.label}
-          </button>
+    <aside className="af-side">
+      <div className="af-brand">
+        <div className="af-logo">AF</div>
+        <div className="af-brand-text">
+          <b>AstraForge</b>
+          <span>星铸 · 深度扫描工作台</span>
         </div>
-      ))}
-    </nav>
+      </div>
+      <nav className="af-nav">
+        {NAV.map(({ id, label, hint, icon: Icon }) => (
+          <button key={id} className={`af-nav-item ${active === id ? 'active' : ''}`}
+            onClick={() => onChange(id)}>
+            <Icon size={17} strokeWidth={1.9} />
+            <span className="af-nav-copy">
+              <b>{label}</b>
+              <small>{hint}</small>
+            </span>
+            {active === id ? <ChevronRight size={13} className="af-nav-arrow" /> : null}
+          </button>
+        ))}
+      </nav>
+      <div className="af-side-foot">
+        <span className="af-dot ok" />
+        <span>本地运行 · 数据不出本机</span>
+      </div>
+    </aside>
   )
 }

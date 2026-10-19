@@ -84,12 +84,15 @@ class RecorderModule:
                 pass
         cand = self.ctx.root_dir.parent / "扫描输出"
         try:
-            os.makedirs(cand, exist_ok=True)
-            probe = cand / ".wtest"
-            probe.touch()
-            probe.unlink()
-            return str(cand)
+            cand.mkdir(parents=True, exist_ok=True)
+            # 只做权限判定，不创建/删除探针文件：
+            # 某些安全软件会拦截临时文件删除（unlink 失败），导致误判"目录不可写"
+            # 而整体回退到用户文档。os.access 足以覆盖 Program Files 只读场景。
+            if os.access(str(cand), os.W_OK):
+                return str(cand)
         except Exception:
+            pass
+        try:
             from pathlib import Path
             alt = Path.home() / "Documents" / "AstraForge" / "扫描输出"
             alt.mkdir(parents=True, exist_ok=True)
@@ -100,6 +103,8 @@ class RecorderModule:
                 except Exception:
                     pass
             return str(alt)
+        except Exception:
+            return str(cand)
 
     def _base_name(self):
         return time.strftime("scan_%Y%m%d_%H%M%S")

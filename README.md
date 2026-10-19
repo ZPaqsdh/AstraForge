@@ -87,17 +87,20 @@ npm install
 npm run build        :: 输出到 ui-web/dist，被 shell.py 直接托管
 ```
 
-### UI 复刻台（假数据，不接硬件）
+### 无设备预览 UI（改界面用）
 
-改 UI 前先用复刻台试，不需要相机 / Python：
+界面改动直接改 `ui-web/src`，构建后用服务模式预览（不打开相机、不弹窗口）：
 
 ```bat
 cd ui-web
-npm run dev:mock     :: 打开 http://127.0.0.1:5199/mock.html
-npm run build:mock   :: 静态版输出到 ui-web/dist-mock/
+npm run build
+cd ..
+python shell.py --no-pipeline --serve-only
+:: 浏览器打开终端打印的 http://127.0.0.1:<port>/index.html
 ```
 
-说明见 `ui-web/README-复刻台.md`。复刻台只打包 `mock.html`，不进入正式 `dist`。
+只有一套界面源码：`ui-web/src/pages`（三维扫描 / 融合工作台 / 设置 / 关于与更新）。
+改完 `npm run build`，桌面软件直接使用新产物，不需要二次搬代码。
 
 ### 单文件/目录版 exe
 

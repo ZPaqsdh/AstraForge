@@ -1,49 +1,26 @@
-export default function Topbar({ status, theme, onTheme }) {
+import { Camera, Activity, Usb } from 'lucide-react'
+
+export default function Topbar({ state, onDeviceClick }) {
+  const dev = state && state.device ? state.device : {}
+  const connected = !!dev.streaming
+  const opened = !!dev.connected
+  const text = connected ? '深度流运行中' : opened ? '已连接 · 等待数据' : '设备未连接'
   return (
-    <header
-      className="flex items-center gap-3 px-4 shrink-0"
-      style={{ height: 50, background: 'var(--panel)', borderBottom: '1px solid var(--border)' }}
-    >
-      <div
-        className="flex items-center justify-center font-bold"
-        style={{
-          width: 30, height: 30, borderRadius: 9, background: 'var(--accent)',
-          color: '#fff', fontSize: 12, letterSpacing: 0.5,
-        }}
-      >AF</div>
-      <div className="flex items-baseline gap-2">
-        <b style={{ fontSize: 15.5 }}>AstraForge 星铸</b>
-        <span style={{ fontSize: 11, color: 'var(--muted)' }}>深度扫描工作台</span>
-        <span
-          style={{
-            fontSize: 11, color: 'var(--muted)', border: '1px solid var(--border-strong)',
-            borderRadius: 9, padding: '1px 8px',
-          }}
-        >v0.2.10</span>
-      </div>
-      <div className="flex items-center gap-1.5 ml-2" style={{ fontSize: 13, color: 'var(--fg)' }}>
-        <span style={{ width: 7, height: 7, borderRadius: '50%', background: status.device ? 'var(--ok)' : 'var(--dim)', display: 'inline-block' }} />
-        {status.device ? '深度流运行中' : '设备未连接'}
-      </div>
-      <div className="flex items-center gap-1.5" style={{ fontSize: 13, color: 'var(--fg)' }}>
-        <span style={{ width: 7, height: 7, borderRadius: '50%', background: status.rgb ? 'var(--ok)' : 'var(--dim)', display: 'inline-block' }} />
-        {status.rgb ? 'RGB 已连接' : 'RGB 未连接'}
-      </div>
-      <div className="ml-auto flex items-center gap-3">
-        <span style={{ fontFamily: 'Consolas, monospace', fontSize: 13 }}>{status.fps?.toFixed ? status.fps.toFixed(1) : '--'} fps</span>
-        <div id="theme-switch" style={{ display: 'flex', border: '1px solid var(--border-strong)', borderRadius: 9, overflow: 'hidden' }}>
-          {[['light', '浅色'], ['dark', '深色'], ['auto', '自动']].map(([k, label]) => (
-            <button
-              key={k}
-              onClick={() => onTheme(k)}
-              style={{
-                background: theme === k ? 'var(--accent)' : 'transparent',
-                color: theme === k ? '#fff' : 'var(--muted)',
-                border: 'none', padding: '4px 11px', fontSize: 12, cursor: 'pointer',
-              }}
-            >{label}</button>
-          ))}
-        </div>
+    <header className="af-top">
+      <button className="af-device-chip" onClick={onDeviceClick} title="前往三维扫描的设备连接">
+        <span className={`af-dot ${connected ? 'ok' : opened ? 'idle' : 'err'}`} />
+        <span className="af-device-name">Astra 深度相机</span>
+        <span className="af-device-state">{text}</span>
+      </button>
+      <div className="af-top-divider" />
+      <span className={`af-top-meta ${state && String(state.rgb).includes('已连接') ? '' : 'off'}`}>
+        <Camera size={13} /> RGB {state && String(state.rgb).includes('已连接') ? '已连接' : '未连接'}
+      </span>
+      <span className="af-top-meta">
+        <Activity size={13} /> {connected && state ? `${(state.fps || 0).toFixed(1)} fps` : '— fps'}
+      </span>
+      <div className="af-top-right">
+        <span className="af-build"><Usb size={11} /> 2BC5:0403</span>
       </div>
     </header>
   )

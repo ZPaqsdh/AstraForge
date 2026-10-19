@@ -21,6 +21,11 @@ export const api = {
   frameUrl: (kind, gray) => `/api/frame?kind=${kind}${gray ? '&gray=1' : ''}&t=${Date.now()}`,
   pixel: (x, y) => req(`/api/pixel?x=${x}&y=${y}`),
 
+  // 设备
+  deviceScan: (deep = false) => req(`/api/device_scan${deep ? '?deep=1' : ''}`),
+  deviceConnect: () => req('/api/device_connect', 'POST', {}),
+  deviceDisconnect: () => req('/api/device_disconnect', 'POST', {}),
+
   // 采集
   saveSnapshot: () => req('/api/save_snapshot', 'POST', {}),
   exportCloud: () => req('/api/export_cloud', 'POST', {}),
@@ -63,11 +68,20 @@ export const api = {
   setPerfMode: (mode) => req('/api/set_perf_mode', 'POST', { mode }),
   setDispRange: (lo, hi) => req('/api/set_disp_range', 'POST', { lo, hi }),
   openDir: (path) => req('/api/open_dir', 'POST', { path }),
+  openUrl: (url) => req('/api/open_url', 'POST', { url }),
+  paths: () => req('/api/paths'),
+  artifactUrl: (path) => `/api/artifact?path=${encodeURIComponent(path)}&t=${Date.now()}`,
 
   // 关于 / 诊断 / OTA
   about: () => req('/api/about'),
   diag: () => req('/api/diag'),
   checkUpdate: () => req('/api/check_update', 'POST', {}),
+
+  // 应用级更新（update.json）
+  updateCheck: () => req('/api/update_check'),
+  updateDownload: (url, sha256, latest) => req('/api/update_download', 'POST', { url, sha256, latest }),
+  updateStatus: () => req('/api/update_status'),
+  updateApply: () => req('/api/update_apply', 'POST', {}),
 
   // 收尾
   shutdown: () => req('/api/shutdown', 'POST', {}),

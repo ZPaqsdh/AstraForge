@@ -1,5 +1,20 @@
 # 更新日志
 
+## v0.3.0-dev — 2026-10-19（未发布）
+
+- **UI 重做**：7 页压成 4 导航 —— 三维扫描 / 融合工作台 / 设置 / 关于与更新；
+  删除旧页面与纯前端复刻台，界面只保留一套源码
+- **三维扫描**：设备扫描/连接/断开 6 状态；实时采集、手持扫描、转台扫描共用一套预览、
+  质量面板与视图工具（深度灰度 / 镜像 / 暂停 / 测距 / 标定 / 色带）
+- **融合工作台**：真实会话列表、融合阶段进度、取消、产物列表与 `fused_preview.png` 预览
+- **关于与更新**：`update.json` 检查 → 下载 → SHA-256 校验 → 退出后替换并重启；
+  5 条更新日志、安装与驱动信息、诊断复制、GitHub Issue 预填
+- 后端新增：`device_scan` / `device_connect` / `device_disconnect` / `paths` /
+  `artifact` / `update_check` / `update_download` / `update_status` / `update_apply`
+- 修复：导出目录探测不再创建/删除临时文件（避免安全软件拦截 unlink 导致误回退）；
+  重连后帧率统计归零，不再出现负值
+- 无设备预览：`python shell.py --no-pipeline --serve-only`
+
 ## 安装器 v4 — 2026-10-18
 
 - **单文件双形态**：在线下载器 `AstraForge-Setup-Online`（259 MB，安装时拉最新载荷）

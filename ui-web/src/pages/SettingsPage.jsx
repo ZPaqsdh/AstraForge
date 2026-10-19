@@ -1,164 +1,206 @@
-import { useEffect, useRef, useState } from 'react'
-import { FolderOpen } from 'lucide-react'
-import PageIntro from '../components/PageIntro.jsx'
+import { useEffect, useState } from 'react'
+import {
+  FolderOpen, Gauge, Cpu, Sun, Moon, Monitor, RotateCcw, HardDrive,
+  SlidersHorizontal, Check, AlertTriangle, FileText,
+} from 'lucide-react'
+import { Btn, Field, Section, Modal } from '../ui.jsx'
 import { api } from '../api.js'
-import { usePoll } from '../hooks.jsx'
 
 export default function SettingsPage({ app }) {
-  const { showToast, state } = app
-  const [st] = usePoll(api.settings, 3000)
-  const [exportDir, setExportDir] = useState('')
-  const [perf, setPerf] = useState('std')
+  const { showToast, theme, setTheme } = app
+  const [s, setS] = useState(null)
+  const [paths, setPaths] = useState(null)
+  const [dir, setDir] = useState('')
+  const [range, setRange] = useState({ lo: '0', hi: '2500' })
+  const [busy, setBusy] = useState(false)
   const [turboOpen, setTurboOpen] = useState(false)
-  const [flip, setFlip] = useState(true)   // 预览镜像（显示层）：默认开（首轮 state 到达后跟随后端持久化值）
+
+  const load = async () => {
+    try {
+      const v = await api.settings()
+      setS(v)
+      setDir(v.export_dir || '')
+      setRange({ lo: String(v.disp_range?.[0] ?? 0), hi: String(v.disp_range?.[1] ?? 2500) })
+    } catch (e) {
+      showToast(`✗ 读取设置失败：${e.message || e}`)
+    }
+  }
 
   useEffect(() => {
-    if (st) {
-      if (st.export_dir && !exportDir) setExportDir(st.export_dir)
-      if (st.perf_mode) setPerf(st.perf_mode)
-    }
-  }, [st])
-
-  // 镜像开关一次性对齐（后端可能已从"设置.json"还原上次的选择）
-  const flipSynced = useRef(false)
-  useEffect(() => {
-    if (!flipSynced.current && state && typeof state.preview_mirror === 'boolean') {
-      flipSynced.current = true
-      setFlip(state.preview_mirror)
-    }
-  }, [state])
-
-  const cores = st?.cpu_cores || 4
-  const gpu = st?.gpu || {}
-
-  const perfDesc = {
-    std: `标准：CPU 使用 ${Math.max(cores - 1, 1)} 核（共 ${cores} 核，始终留 1 核给系统）；不使用 GPU。边用电脑边扫描不卡。`,
-    perf: `性能：CPU 保持保守（留 1 核，${Math.max(cores - 1, 1)} 核）+ 启用 GPU 加速。${gpu.name ? `已检测到 ${gpu.name}，融合可提速 5-10 倍。` : '未检测到 NVIDIA 显卡 —— 等效标准模式（AMD/Intel 暂走 CPU 多核）。'}`,
-    turbo: '狂暴：全部 CPU 核心 + GPU 满功率。若电脑变卡请切回标准模式。',
-  }
-
-  const choosePerf = (m) => {
-    if (m === 'turbo') { setTurboOpen(true); return }
-    setPerf(m)
-    api.setPerfMode(m).then(r => {
-      if (r.ok) showToast(`✓ 性能模式 → ${m === 'std' ? '标准' : '性能'}（workers=${r.workers}）`)
-    }).catch(e => showToast(`✗ ${e.message}`))
-  }
-
-  const confirmTurbo = () => {
-    setTurboOpen(false)
-    setPerf('turbo')
-    api.setPerfMode('turbo').then(r => {
-      if (r.ok) showToast(`狂暴模式已开启（免责已确认，workers=${r.workers}）`)
-    }).catch(e => showToast(`✗ ${e.message}`))
-  }
+    load()
+    api.paths().then(setPaths).catch(() => {})
+  }, [])
 
   const applyDir = async () => {
-    if (!exportDir.trim()) { showToast('目录不能为空'); return }
+    if (!dir.trim()) { showToast('目录不能为空'); return }
+    setBusy(true)
     try {
-      const r = await api.setExportDir(exportDir.trim())
-      if (r.ok) showToast(`✓ 导出目录已保存: ${r.dir}`)
-      else showToast(`✗ ${r.error}`)
-    } catch (e) { showToast(`✗ ${e.message}`) }
+      const r = await api.setExportDir(dir.trim())
+      if (r && r.ok === false) throw new Error(r.error || '保存失败')
+      showToast(`✓ 导出目录已保存：${dir.trim()}`, 4200)
+      load()
+    } catch (e) {
+      showToast(`✗ ${e.message || e}`, 4200)
+    } finally {
+      setBusy(false)
+    }
   }
 
+  const choosePerf = async (mode) => {
+    if (mode === 'turbo') { setTurboOpen(true); return }
+    await applyPerf(mode)
+  }
+
+  const applyPerf = async (mode) => {
+    try {
+      const r = await api.setPerfMode(mode)
+      if (r && r.ok === false) throw new Error(r.error || '切换失败')
+      showToast(`✓ 性能模式：${mode === 'std' ? '标准' : '性能'}`)
+      load()
+    } catch (e) {
+      showToast(`✗ ${e.message || e}`, 4200)
+    }
+  }
+
+  const applyRange = async () => {
+    setBusy(true)
+    try {
+      await api.setDispRange(Number(range.lo) || 0, Number(range.hi) || 2500)
+      showToast(`✓ 显示范围：${range.lo}–${range.hi}`)
+      load()
+    } catch (e) {
+      showToast(`✗ ${e.message || e}`)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const reset = async () => {
+    setBusy(true)
+    try {
+      await api.setPerfMode('std')
+      await api.setDispRange(0, 2500)
+      setTheme('light')
+      setRange({ lo: '0', hi: '2500' })
+      showToast('✓ 已恢复默认：标准性能 / 显示范围 0–2500 / 浅色主题')
+      load()
+    } catch (e) {
+      showToast(`✗ ${e.message || e}`)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const perf = s?.perf_mode || 'std'
+  const gpu = s?.gpu || {}
+  const cores = s?.cpu_cores || 0
+
   return (
-    <div className="fade-in page-grid">
-      <PageIntro id="settings">
-        <b>设置</b>：外观主题（深色/浅色/跟随系统）、导出目录（文件保存位置）、性能模式（融合用多少算力）、设备（镜像/RGB 摄像头）、检查更新。
-      </PageIntro>
-      <div className="layout-cards">
-        <div className="card">
-          <h3>导出</h3>
-          <div className="field"><label>导出目录</label>
-            <input type="text" value={exportDir} onChange={e => setExportDir(e.target.value)}
-              style={{ flex: 1, minWidth: 0, fontSize: 11.5 }} placeholder="D:\...\扫描输出" />
-          </div>
-          <div className="row" style={{ marginTop: 7 }}>
-            <button className="btn" onClick={() => showToast('提示：直接编辑路径后点“应用”（网页沙箱限制选择对话框）')}><FolderOpen size={14} /> 浏览…</button>
-            <button className="btn primary" onClick={applyDir}>应用</button>
-          </div>
-          <div className="hint" style={{ marginTop: 7 }}>所有导出（快照/点云/转台/融合产物）都保存到这里。</div>
+    <div className="af-page af-settings">
+      <header className="af-page-head">
+        <div>
+          <h1>设置</h1>
+          <p>只放长期生效的默认值；临时视图操作在三维扫描的视图工具条里</p>
         </div>
+      </header>
 
-        <div className="card">
-          <h3>性能</h3>
-          <div className="field"><label>模式</label>
-            <select value={perf} onChange={e => choosePerf(e.target.value)} style={{ flex: 1, minWidth: 0 }}>
-              <option value="std">标准（保留 1 核 · 不用 GPU）</option>
-              <option value="perf">性能（保留 1 核 · GPU 启用）</option>
-              <option value="turbo">狂暴（全部拉满）</option>
-            </select></div>
-          <div className="hint" style={{ marginTop: 7 }}>{perfDesc[perf]}</div>
-          <div className="stat" style={{ marginTop: 9 }}>
-            <span className="k">本机检测</span>
-            <span className="v">{cores} 核 / {gpu.name || '无 NVIDIA'}</span>
+      <div className="af-settings-grid">
+        <Section title="导出" aside={<HardDrive size={15} />}>
+          <Field label="导出目录" hint="快照、点云、转台/手持会话、融合产物都写入这里">
+            <input value={dir} onChange={(e) => setDir(e.target.value)} className="af-mono"
+              placeholder="例如 D:\AstraForge\扫描输出" />
+          </Field>
+          <div className="af-row">
+            <Btn icon={FolderOpen} disabled={!dir}
+              onClick={() => api.openDir(dir).catch((e) => showToast(e.message))}>打开目录</Btn>
+            <Btn primary icon={Check} disabled={busy} onClick={applyDir}>应用</Btn>
           </div>
-        </div>
+          <div className="af-note">切换目录后新采集写入新位置；已有会话仍在原目录。</div>
+        </Section>
 
-        <div className="card">
-          <h3>外观</h3>
-          <div className="field"><label>主题</label>
-            <select defaultValue="light" onChange={e => {
-              document.documentElement.dataset.theme = e.target.value
-              try { localStorage.setItem('af-theme', e.target.value) } catch {}
-            }} style={{ flex: 1, minWidth: 0 }}>
-              <option value="light">浅色（默认）</option>
-              <option value="dark">深色</option>
-              <option value="auto">跟随系统</option>
-            </select></div>
-          <div className="hint" style={{ marginTop: 7 }}>顶栏右侧也可快速切换；选择会被记住。</div>
-          <div className="field" style={{ marginTop: 9 }}><label>预览镜像</label>
-            <select value={flip ? '1' : '0'} onChange={async e => {
-              const v = e.target.value === '1'
-              setFlip(v)
-              await api.setFlip(v).catch(() => {})
-              showToast(`预览镜像: ${v ? '开' : '关'}`)
-            }} style={{ width: 90 }}>
-              <option value="1">开</option><option value="0">关</option>
-            </select></div>
-          <div className="hint" style={{ marginTop: 7 }}>预览与保存/导出统一为"照镜子"方向（人在哪边、画面和文件里也在哪边）；此开关只用于预览翻面对比。</div>
-        </div>
+        <Section title="性能" aside={<Gauge size={15} />}>
+          <div className="af-perf-list">
+            {[
+              ['std', '标准', 'CPU 保留 1 核 · 不用 GPU', '边用电脑边扫描'],
+              ['perf', '性能', 'CPU 保留 1 核 · GPU 加速', '融合更快'],
+              ['turbo', '狂暴', '全部 CPU + GPU 满功率', '需要确认免责'],
+            ].map(([id, name, desc, hint]) => (
+              <button key={id} className={`af-choice ${perf === id ? 'active' : ''}`}
+                onClick={() => choosePerf(id)}>
+                <span className="af-choice-radio" />
+                <span className="af-choice-copy"><b>{name}</b><small>{desc}</small></span>
+                <span className="af-choice-hint">{hint}</span>
+              </button>
+            ))}
+          </div>
+          <div className="af-hint">
+            本机：{cores} 核 / {gpu.cuda ? 'CUDA 可用' : (gpu.name || '未检测到 NVIDIA')}
+          </div>
+        </Section>
 
-        <div className="card">
-          <h3>更新</h3>
-          <div className="hint" style={{ marginBottom: 8 }}>
-            通过 GitHub OTA 更新单个模块（不改动整包）。需先在设置源里配置仓库地址（见 README）。
+        <Section title="外观" aside={<Sun size={15} />}>
+          <Field label="主题" hint="全应用唯一主题入口">
+            <div className="af-segmented">
+              <button className={theme === 'light' ? 'active' : ''} onClick={() => setTheme('light')}>
+                <Sun size={13} /> 浅色</button>
+              <button className={theme === 'dark' ? 'active' : ''} onClick={() => setTheme('dark')}>
+                <Moon size={13} /> 深色</button>
+              <button className={theme === 'auto' ? 'active' : ''} onClick={() => setTheme('auto')}>
+                <Monitor size={13} /> 跟随系统</button>
+            </div>
+          </Field>
+          <div className="af-note">镜像、深度灰度、暂停、显示范围在三维扫描的视图工具条里，不在这里重复。</div>
+        </Section>
+
+        <Section title="深度显示" aside={<SlidersHorizontal size={15} />}>
+          <div className="af-inline-2">
+            <Field label="最小色带值"><input value={range.lo}
+              onChange={(e) => setRange({ ...range, lo: e.target.value })} /></Field>
+            <Field label="最大色带值"><input value={range.hi}
+              onChange={(e) => setRange({ ...range, hi: e.target.value })} /></Field>
           </div>
-          <div className="row">
-            <button className="btn" onClick={async () => {
-              try {
-                const r = await api.checkUpdate()
-                showToast(r.ok ? `检查完成: ${JSON.stringify(r.result).slice(0, 120)}` : `检查失败: ${r.error}`)
-              } catch (e) { showToast(`✗ ${e.message}`) }
-            }}>检查更新</button>
-            <button className="btn" onClick={() => showToast('版本信息见「关于」页')}>当前版本</button>
+          <div className="af-row">
+            <Btn icon={RotateCcw} onClick={() => setRange({ lo: '0', hi: '2500' })}>重置 0–2500</Btn>
+            <Btn primary icon={Check} disabled={busy} onClick={applyRange}>应用</Btn>
           </div>
-        </div>
+          <div className="af-note">只影响预览色带，不改变采集数据与导出文件。</div>
+        </Section>
+
+        <Section title="高级" className="af-span-2" aside={<Cpu size={15} />}>
+          <div className="af-row wrap">
+            <Btn icon={RotateCcw} disabled={busy} onClick={reset}>恢复默认设置</Btn>
+            <Btn icon={FolderOpen} disabled={!paths?.root}
+              onClick={() => api.openDir(paths.root).catch((e) => showToast(e.message))}>打开程序目录</Btn>
+            <Btn icon={FileText} disabled={!paths?.log}
+              onClick={() => api.openDir(paths.log).catch((e) => showToast(e.message))}>打开日志文件</Btn>
+          </div>
+          <div className="af-kv" style={{ marginTop: 8 }}>
+            <span>程序目录</span>
+            <b className="af-mono ellipsis" title={paths?.root}>{paths?.root || '—'}</b>
+          </div>
+          <div className="af-kv">
+            <span>Python</span><b className="af-mono">{paths?.python || '—'}</b>
+          </div>
+          <div className="af-hint">诊断、更新日志与反馈统一在「关于与更新」。</div>
+        </Section>
       </div>
 
-      {/* 狂暴模式免责模态 */}
-      {turboOpen && (
-        <div style={{
-          position: 'fixed', inset: 0, background: 'rgba(0,0,0,.45)', zIndex: 400,
-          display: 'flex', alignItems: 'center', justifyContent: 'center',
-        }}>
-          <div className="card" style={{ width: 420, padding: 20 }}>
-            <h3 style={{ fontSize: 15, marginBottom: 10 }}>狂暴模式 · 免责声明</h3>
-            <div className="hint" style={{ lineHeight: 1.9 }}>
-              狂暴模式将使用<b>全部 CPU 核心</b>与<b>显卡满功率</b>算力。<br />
-              可能导致：系统卡顿、发热、风扇噪音明显、电池快速耗尽。<br />
-              建议：插电使用，期间不要处理重要工作。<br />
-              一切后果由使用者自行承担。可随时切回标准或性能模式。
-            </div>
-            <div className="row" style={{ marginTop: 14, justifyContent: 'flex-end' }}>
-              <button className="btn" onClick={() => setTurboOpen(false)}>取消</button>
-              <button className="btn" style={{ background: 'var(--err)', borderColor: 'var(--err)', color: '#fff' }}
-                onClick={confirmTurbo}>我已知晓，开启狂暴</button>
-            </div>
+      {turboOpen ? (
+        <Modal title="狂暴模式 · 免责声明" onClose={() => setTurboOpen(false)}>
+          <div className="af-warning">
+            <AlertTriangle size={18} />
+            <p>狂暴模式会使用全部 CPU 核心与显卡满功率算力，可能导致系统卡顿、发热、风扇噪音、
+              电池快速耗尽。建议插电使用，期间不要处理重要工作。</p>
           </div>
-        </div>
-      )}
+          <div className="af-modal-actions">
+            <Btn onClick={() => setTurboOpen(false)}>取消</Btn>
+            <Btn danger onClick={async () => {
+              setTurboOpen(false)
+              await applyPerf('turbo')
+            }}>我已知晓，开启</Btn>
+          </div>
+        </Modal>
+      ) : null}
     </div>
   )
 }

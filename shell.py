@@ -18,6 +18,7 @@ import os
 import socketserver
 import subprocess
 import sys
+import tempfile
 import threading
 import time
 from pathlib import Path
@@ -27,6 +28,11 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 APP_VERSION = "0.2.10"
+
+# 应用级更新源（与 installer/setup_core.py 的 DEFAULT_UPDATE_URL 保持一致；
+# 测试可用 AF_UPDATE_URL 覆盖）。update.json 由 Release 的 latest/download 恒定入口提供。
+UPDATE_URL = (os.environ.get("AF_UPDATE_URL", "").strip()
+              or "https://github.com/ZPaqsdh/AstraForge/releases/latest/download/update.json")
 
 # QtWebEngine flags（必须在 Qt 初始化前设置）：
 #   --no-sandbox    ：QtWebEngineProcess 子进程在受限环境必需（否则 loadFinished=False）
@@ -250,8 +256,11 @@ class ApiHandler(http.server.SimpleHTTPRequestHandler):
         self.wfile.write(out)
 
     def _send_jpeg(self, data):
+        self._send_bytes(data, "image/jpeg")
+
+    def _send_bytes(self, data, ctype="application/octet-stream"):
         self.send_response(200)
-        self.send_header("Content-Type", "image/jpeg")
+        self.send_header("Content-Type", ctype)
         self.send_header("Content-Length", str(len(data)))
         self.send_header("Access-Control-Allow-Origin", "*")
         self.send_header("Cache-Control", "no-store")
@@ -263,10 +272,11 @@ class ApiHandler(http.server.SimpleHTTPRequestHandler):
         name = path[5:].strip("/")
         query = {}
         if "?" in self.path:
+            from urllib.parse import unquote
             for kv in self.path.split("?", 1)[1].split("&"):
                 if "=" in kv:
                     k, v = kv.split("=", 1)
-                    query[k] = v
+                    query[k] = unquote(v)
         body = {}
         if method == "POST":
             n = int(self.headers.get("Content-Length", 0) or 0)
@@ -284,6 +294,8 @@ class ApiHandler(http.server.SimpleHTTPRequestHandler):
                     print(f"[http] {method} /{name} -> {dt:.0f}ms", flush=True)
             if isinstance(result, tuple) and result[0] == "__jpeg__":
                 self._send_jpeg(result[1])
+            elif isinstance(result, tuple) and result[0] == "__file__":
+                self._send_bytes(result[1], result[2] if len(result) > 2 else "application/octet-stream")
             else:
                 self._send_json({"ok": True, "data": result})
         except Exception as e:
@@ -481,6 +493,11 @@ class Bridge:
 
     def __init__(self, pipeline=None):
         self.pipeline = pipeline
+        self._dev_lock = threading.Lock()
+        self._upd_lock = threading.Lock()
+        self._upd = {"phase": "idle", "pct": 0, "msg": "", "path": "",
+                     "latest": "", "error": None}
+        self._scan_cache = (0.0, None)
 
     # ---- 模块快捷取用 ----
     def _m(self, name):
@@ -512,8 +529,11 @@ class Bridge:
               "rec_continuous": False, "tt_count": 0,
               "modules": self.pipeline.versions() if self.pipeline else {}}
         if dev is not None:
-            st["device"]["connected"] = dev.link is not None
-            st["device"]["streaming"] = bool(dev.link and dev.link.stream_on)
+            link = getattr(dev, "link", None)
+            opened = bool(link is not None and getattr(link, "dev", None) is not None)
+            st["device"]["connected"] = opened
+            st["device"]["streaming"] = bool(opened and getattr(link, "stream_on", False))
+            st["device"]["info"] = "2BC5:0403"
             st["fps"] = round(_calc_fps(getattr(dev, "cap", None), _fps_meter_state), 1)
         if rec is not None:
             st["export_dir"] = str(rec._out_dir())
@@ -639,6 +659,152 @@ class Bridge:
         q["ok"] = True
         return q
 
+    # ---------- 设备：检测 / 连接 / 断开 ----------
+    _PS_CAM = (
+        "$d = Get-PnpDevice -PresentOnly | Where-Object { $_.InstanceId -like 'USB\\VID_2BC5*' }; "
+        "foreach ($x in $d) { "
+        "$s = (Get-PnpDeviceProperty -InstanceId $x.InstanceId -KeyName "
+        "'DEVPKEY_Device_Service' -ErrorAction SilentlyContinue).Data; "
+        "Write-Output ($x.InstanceId + '|' + $x.Status + '|' + $s) }"
+    )
+
+    def _usb_cameras(self):
+        """快速枚举（pyusb + 项目 libusb 后端，约 0.3s）：正常 WinUSB 下先走这里。
+
+        返回 None 表示"不可判定"（无设备/驱动冲突/后端异常），回退 PowerShell 慢查。
+        """
+        try:
+            import usb.core
+            from astra_raw.transport import _get_backend
+            devs = list(usb.core.find(find_all=True, idVendor=0x2BC5,
+                                      backend=_get_backend()))
+        except Exception:
+            return None
+        if not devs:
+            return None
+        out = {"ok": True, "depth": {"found": False, "state": "absent"},
+               "color": {"found": False}, "devices": [], "fast": True}
+        for d in devs:
+            pid = f"{int(d.idProduct):04X}"
+            item = {"pid": pid, "status": "OK",
+                    "service": "WinUSB" if pid == "0403" else "usbvideo",
+                    "state": "ready" if pid == "0403" else "other",
+                    "instance": f"USB\\VID_2BC5&PID_{pid}"}
+            out["devices"].append(item)
+            if pid == "0403":
+                out["depth"] = dict(item, found=True)
+            elif pid == "0501":
+                out["color"] = {"found": True, "service": "usbvideo"}
+        return out
+
+    def _pnp_cameras(self, deep=False):
+        """只读枚举 2BC5 设备：默认 pyusb 快查；deep=True 走 PowerShell 查驱动绑定。"""
+        if not deep:
+            fast = self._usb_cameras()
+            if fast and fast.get("depth", {}).get("found"):
+                return fast
+        import re as _re
+        out = {"ok": False, "depth": {"found": False, "state": "absent"},
+               "color": {"found": False}, "devices": []}
+        try:
+            r = subprocess.run(["powershell", "-NoProfile", "-NonInteractive",
+                                "-Command", self._PS_CAM],
+                               capture_output=True, timeout=10,
+                               creationflags=0x08000000)
+            txt = (r.stdout or b"").decode("utf-8", "replace")
+        except Exception as e:
+            out["error"] = str(e)[:100]
+            return out
+        for line in txt.splitlines():
+            line = line.strip()
+            if "VID_2BC5" not in line:
+                continue
+            parts = line.split("|")
+            if len(parts) < 3:
+                continue
+            iid, status, svc = parts[0].strip(), parts[1].strip(), parts[2].strip()
+            m = _re.search(r"PID_([0-9A-Fa-f]{4})", iid)
+            pid = m.group(1).upper() if m else ""
+            low = svc.lower()
+            if "winusb" in low:
+                state = "ready"
+            elif low.startswith("obdrv") or "orbbec" in low:
+                state = "conflict"
+            elif not svc:
+                state = "nodriver"
+            else:
+                state = "other"
+            item = {"pid": pid, "status": status, "service": svc,
+                    "state": state, "instance": iid}
+            out["devices"].append(item)
+            if pid == "0501":
+                out["color"] = {"found": True, "service": svc}
+            elif pid:
+                out["depth"] = dict(item, found=True)
+        out["ok"] = True
+        return out
+
+    def api_device_scan(self, deep=0, **kw):
+        deep = bool(str(deep).strip().lower() in ("1", "true", "yes", "on"))
+        now = time.time()
+        ts, cached = self._scan_cache
+        if not deep and cached is not None and now - ts < 3.0:
+            return cached
+        r = self._pnp_cameras(deep=deep)
+        if not deep:
+            self._scan_cache = (now, r)
+        return r
+
+    def api_device_connect(self, **kw):
+        dev = self._m("device")
+        if dev is None:
+            return {"ok": False, "error": "device 模块未装配（--no-pipeline 调试模式）"}
+        with self._dev_lock:
+            link = getattr(dev, "link", None)
+            if link is not None and getattr(link, "dev", None) is not None:
+                return {"ok": True, "already": True, "connected": True,
+                        "streaming": bool(getattr(link, "stream_on", False))}
+            try:
+                dev.stop()
+            except Exception:
+                pass
+            if self.pipeline:
+                self.pipeline.bus.publish("module.log", ("[device] 正在重新连接…", True))
+            dev.stop_evt = threading.Event()
+            dev.link = None
+            try:
+                dev.start()
+            except Exception as e:
+                return {"ok": False, "error": f"连接异常：{str(e)[:120]}"}
+            link = getattr(dev, "link", None)
+            opened = bool(link is not None and getattr(link, "dev", None) is not None)
+            for m in (_fps_meter_state, _fps_meter_stats, _fps_meter_rgb):
+                m.update(t=0.0, i=0, v=0.0)      # 重连后帧计数归零，避免负帧率
+            if self.pipeline:
+                self.pipeline.bus.publish(
+                    "module.log",
+                    ("[device] 已连接 2BC5:0403" if opened else
+                     "[device] 未找到设备或驱动不可用（2BC5:0403）", opened))
+            return {"ok": opened, "connected": opened,
+                    "streaming": bool(opened and getattr(link, "stream_on", False)),
+                    "error": "" if opened else "未找到设备（2BC5:0403），或驱动被占用/需要 WinUSB"}
+
+    def api_device_disconnect(self, **kw):
+        dev = self._m("device")
+        if dev is None:
+            return {"ok": False, "error": "device 模块未装配"}
+        with self._dev_lock:
+            try:
+                dev.stop()
+            except Exception as e:
+                return {"ok": False, "error": f"断开异常：{str(e)[:120]}"}
+            dev.link = None
+            for m in (_fps_meter_state, _fps_meter_stats, _fps_meter_rgb):
+                m.update(t=0.0, i=0, v=0.0)
+            if self.pipeline:
+                self.pipeline.bus.publish("module.log", ("[device] 已断开（红外已关）", True))
+        return {"ok": True, "connected": False}
+
     # ---------- 采集 ----------
     def api_save_snapshot(self, **kw):
         rec = self._m("recorder")
@@ -647,7 +813,8 @@ class Bridge:
         base = rec.save_snapshot()
         if not base:
             return {"ok": False, "error": "还没有画面"}
-        return {"ok": True, "path": base + ".npy"}
+        return {"ok": True, "path": base + ".npy", "png": base + "_depth.png",
+                "rgb_png": base + "_rgb.png" if os.path.exists(base + "_rgb.png") else ""}
 
     def api_export_cloud(self, **kw):
         rec = self._m("recorder")
@@ -884,16 +1051,51 @@ class Bridge:
         return fus.fuse_cancel() if fus else {"ok": False}
 
     def api_list_dirs(self, **kw):
-        """扫描输出目录下的可融合采集目录（turntable_ 转台 / scan_session_ 手持）。"""
+        """扫描输出目录下的可融合采集目录（turntable_ 转台 / scan_session_ 手持）。
+
+        返回给融合工作台直接渲染：帧数、类型、覆盖角度、时间、产物、预览图。
+        """
         rec = self._m("recorder")
         base = Path(rec._out_dir()) if rec else ROOT.parent / "扫描输出"
         out = []
         if base.exists():
             for d in sorted(base.iterdir(), reverse=True):
-                if d.is_dir() and (d.name.startswith("turntable_")
-                                   or d.name.startswith("scan_session_")):
-                    out.append({"name": d.name, "path": str(d),
-                                "frames": len(list(d.glob("frame_*.npy")))})
+                if not d.is_dir() or not (d.name.startswith("turntable_")
+                                          or d.name.startswith("scan_session_")):
+                    continue
+                frames = len(list(d.glob("frame_*.npy")))
+                man = {}
+                try:
+                    mf = d / "manifest.json"
+                    if mf.exists():
+                        man = json.loads(mf.read_text(encoding="utf-8"))
+                except Exception:
+                    man = {}
+                angle = 0.0
+                for fr in (man.get("frames") or []):
+                    try:
+                        angle = max(angle, float(fr.get("angle") or 0.0))
+                    except Exception:
+                        pass
+                arts = []
+                for p in d.iterdir():
+                    # 只把融合产物当"产物"；frame_*.npy / frame_*_rgb.png 是输入帧，不展示
+                    if p.is_file() and p.name.startswith("fused_") and p.suffix.lower() in (".ply", ".stl", ".png", ".obj"):
+                        arts.append({"name": p.name, "size": p.stat().st_size,
+                                     "path": str(p)})
+                arts.sort(key=lambda x: x["name"])
+                preview = next((a for a in arts if a["name"] == "fused_preview.png"), None)
+                try:
+                    mtime = d.stat().st_mtime
+                    date = time.strftime("%Y-%m-%d %H:%M", time.localtime(mtime))
+                except Exception:
+                    mtime, date = 0, ""
+                out.append({"name": d.name, "path": str(d), "frames": frames,
+                            "type": "turntable" if d.name.startswith("turntable_") else "handheld",
+                            "coverage": round(angle, 1), "date": date, "mtime": mtime,
+                            "artifacts": arts,
+                            "preview": preview["path"] if preview else "",
+                            "fused": bool(preview)})
         return {"dirs": out, "base": str(base)}
 
     # ---------- 标定 / 测距 ----------
@@ -955,10 +1157,12 @@ class Bridge:
         rec = self._m("recorder")
         fus = self._m("fusion")
         st = self._m("settings")
-        return {"export_dir": str(rec._out_dir()) if rec else "",
+        return {"export_dir": str(rec._out_dir()) if rec else str(ROOT.parent / "扫描输出"),
                 "perf_mode": getattr(fus, "_perf_mode", "std") if fus else "std",
                 "disp_range": st.disp_range if st else [0.0, 2500.0],
+                "preview_mirror": bool(_preview_mirror["on"]),
                 "cpu_cores": os.cpu_count() or 4,
+                "version": APP_VERSION,
                 "gpu": fus.detect_gpu() if fus else None}
 
     def api_set_export_dir(self, dir="", **kw):
@@ -1011,6 +1215,64 @@ class Bridge:
         except Exception as e:
             return {"ok": False, "error": str(e)[:100]}
 
+    def api_open_url(self, url="", **kw):
+        """用系统默认浏览器打开链接（QtWebEngine 内 window.open 会开子窗口，不可靠）。"""
+        u = (url or "").strip()
+        if not u.lower().startswith(("http://", "https://", "mailto:")):
+            return {"ok": False, "error": "仅允许 http/https/mailto"}
+        try:
+            os.startfile(u)
+            return {"ok": True}
+        except Exception as e:
+            return {"ok": False, "error": str(e)[:100]}
+
+    def api_paths(self, **kw):
+        """安装布局与可打开的真实路径（关于页 / 设置页使用）。"""
+        rec = self._m("recorder")
+        install_root = ROOT.parent
+        driver_tool = ""
+        for cand in (install_root / "驱动工具" / "zadig.exe",
+                     ROOT / "installer" / "driver" / "zadig.exe",
+                     ROOT / "installer" / "driver" / "pack" / "zadig" / "zadig.exe"):
+            if cand.exists():
+                driver_tool = str(cand)
+                break
+        uninstaller = ""
+        for cand in (install_root / "AstraForge-卸载.exe",
+                     install_root / "_setup" / "AstraForge-卸载.exe"):
+            if cand.exists():
+                uninstaller = str(cand)
+                break
+        return {"root": str(ROOT), "install_root": str(install_root),
+                "installed": (install_root / "AstraForge.exe").exists(),
+                "export": str(rec._out_dir()) if rec else str(ROOT.parent / "扫描输出"),
+                "data": str(ROOT / "data"),
+                "driver_tool": driver_tool,
+                "uninstaller": uninstaller,
+                "log": str(ROOT / "shell_web.log"),
+                "python": sys.version.split()[0]}
+
+    def api_artifact(self, path="", **kw):
+        """读取导出目录内的产物图片（融合预览），只允许 png/jpg，防路径穿越。"""
+        rec = self._m("recorder")
+        base = Path(rec._out_dir()) if rec else (ROOT.parent / "扫描输出")
+        try:
+            base = base.resolve()
+            p = Path(path).resolve()
+            if p != base and base not in p.parents:
+                return {"ok": False, "error": "路径不在导出目录内"}
+            if not p.is_file():
+                return {"ok": False, "error": "文件不存在"}
+            ctype = {".png": "image/png", ".jpg": "image/jpeg",
+                     ".jpeg": "image/jpeg"}.get(p.suffix.lower())
+            if not ctype:
+                return {"ok": False, "error": "只支持图片"}
+            if p.stat().st_size > 20 * 1024 * 1024:
+                return {"ok": False, "error": "图片过大"}
+            return ("__file__", p.read_bytes(), ctype)
+        except Exception as e:
+            return {"ok": False, "error": str(e)[:100]}
+
     # ---------- 关于 / 诊断 / OTA ----------
     def api_about(self, **kw):
         return {"app": "AstraForge", "version": APP_VERSION,
@@ -1057,6 +1319,143 @@ class Bridge:
         except Exception as e:
             return {"ok": False, "error": str(e)[:120]}
 
+    # ---------- 应用级更新（update.json → 下载 → 校验 → 退出后替换） ----------
+    def _fetch_update_manifest(self, timeout=6.0):
+        import urllib.request
+        try:
+            req = urllib.request.Request(UPDATE_URL, headers={
+                "User-Agent": "AstraForge-App/1.0"})
+            with urllib.request.urlopen(req, timeout=timeout) as r:
+                data = json.loads(r.read().decode("utf-8"))
+            if not isinstance(data, dict) or not data.get("latest"):
+                return None, "update.json 格式不正确"
+            return data, None
+        except Exception as e:
+            return None, f"{type(e).__name__}: {str(e)[:90]}"
+
+    def api_update_check(self, **kw):
+        """应用更新检查：读 Release 的 update.json，与本机 APP_VERSION 比较。"""
+        data, err = self._fetch_update_manifest()
+        if data is None:
+            return {"ok": False, "error": err, "current": APP_VERSION}
+        latest = str(data.get("latest"))
+        can_apply = (ROOT.parent / "AstraForge.exe").exists()
+        return {"ok": True, "current": APP_VERSION, "latest": latest,
+                "has_update": _ver_gt(latest, APP_VERSION),
+                "payload_url": str(data.get("payload_url") or ""),
+                "payload_sha256": str(data.get("payload_sha256") or ""),
+                "notes_url": str(data.get("notes_url") or ""),
+                "min_installer": str(data.get("min_installer") or ""),
+                "can_apply": can_apply,
+                "mode": "installed" if can_apply else "dev"}
+
+    def api_update_download(self, url="", sha256="", latest="", **kw):
+        """后台下载更新包（.part → SHA-256 → 改名）；进度用 /api/update_status 轮询。"""
+        if not url:
+            return {"ok": False, "error": "缺少下载地址"}
+        with self._upd_lock:
+            if self._upd.get("phase") == "downloading":
+                return {"ok": True, "state": dict(self._upd)}
+            dest_dir = Path(tempfile.gettempdir()) / "AstraForge" / "updates"
+            dest_dir.mkdir(parents=True, exist_ok=True)
+            dest = dest_dir / f"AstraForge-{latest or 'latest'}-payload.zip"
+            self._upd = {"phase": "downloading", "pct": 0, "msg": "连接下载源…",
+                         "path": str(dest), "latest": latest, "error": None}
+
+        def run():
+            import hashlib
+            import urllib.request
+            tmp = dest.with_name(dest.name + ".part")
+            try:
+                req = urllib.request.Request(url, headers={
+                    "User-Agent": "AstraForge-App/1.0"})
+                with urllib.request.urlopen(req, timeout=30) as r, open(tmp, "wb") as f:
+                    total = int(r.headers.get("Content-Length") or 0)
+                    h = hashlib.sha256()
+                    got = 0
+                    while True:
+                        chunk = r.read(256 * 1024)
+                        if not chunk:
+                            break
+                        f.write(chunk)
+                        h.update(chunk)
+                        got += len(chunk)
+                        pct = int(got * 100 / total) if total else 0
+                        with self._upd_lock:
+                            self._upd.update(pct=pct,
+                                             msg=f"下载中 {got // 1048576} MB")
+                want = (sha256 or "").strip().lower()
+                if want and h.hexdigest() != want:
+                    try:
+                        tmp.unlink()
+                    except Exception:
+                        pass
+                    with self._upd_lock:
+                        self._upd.update(phase="error", error="SHA-256 校验失败，已删除下载文件")
+                    return
+                if dest.exists():
+                    dest.unlink()
+                tmp.replace(dest)
+                with self._upd_lock:
+                    self._upd.update(phase="done", pct=100, msg="下载完成，校验通过",
+                                     sha256=h.hexdigest())
+            except Exception as e:
+                try:
+                    tmp.unlink()
+                except Exception:
+                    pass
+                with self._upd_lock:
+                    self._upd.update(phase="error",
+                                     error=f"{type(e).__name__}: {str(e)[:100]}")
+
+        threading.Thread(target=run, daemon=True, name="app-update-dl").start()
+        return {"ok": True, "state": dict(self._upd)}
+
+    def api_update_status(self, **kw):
+        with self._upd_lock:
+            return dict(self._upd)
+
+    def api_update_apply(self, **kw):
+        """退出应用后由 PowerShell 覆盖 payload 并重启（仅已安装布局可用）。
+
+        payload.zip 的根就是安装目录（AstraForge.exe + code/ + _internal/ …）。
+        """
+        with self._upd_lock:
+            st = dict(self._upd)
+        if st.get("phase") != "done":
+            return {"ok": False, "error": "还没有下载完成的更新包"}
+        install = ROOT.parent
+        exe = install / "AstraForge.exe"
+        if not exe.exists():
+            return {"ok": False, "error": "当前是开发目录，不能自动覆盖；请用安装器更新"}
+        zip_path = Path(st.get("path") or "")
+        if not zip_path.exists():
+            return {"ok": False, "error": "更新包不存在，请重新下载"}
+        script = Path(tempfile.gettempdir()) / "AstraForge" / "apply_update.ps1"
+        script.parent.mkdir(parents=True, exist_ok=True)
+        ps = (
+            "Start-Sleep -Seconds 2\n"
+            "Get-Process AstraForge -ErrorAction SilentlyContinue | "
+            "Stop-Process -Force -ErrorAction SilentlyContinue\n"
+            f"Expand-Archive -LiteralPath '{zip_path}' -DestinationPath "
+            f"'{install}' -Force\n"
+            f"Start-Process -FilePath '{exe}'\n"
+        )
+        try:
+            script.write_text(ps, encoding="utf-8-sig")
+            subprocess.Popen(
+                ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass",
+                 "-WindowStyle", "Hidden", "-File", str(script)],
+                close_fds=True, creationflags=0x08000000 | 0x00000008)
+        except Exception as e:
+            return {"ok": False, "error": f"无法启动更新脚本：{str(e)[:100]}"}
+
+        def _bye():
+            time.sleep(1.0)
+            os._exit(0)
+        threading.Thread(target=_bye, daemon=True, name="app-update-exit").start()
+        return {"ok": True, "msg": "正在退出并替换程序文件…"}
+
     # ---------- 心跳（窗口存活判定：Edge 多进程模型下 proc.wait 不可靠） ----------
     _beat = {"last": 0.0, "got": False}
 
@@ -1096,6 +1495,17 @@ def _num(v):
             return float(v)
         except (TypeError, ValueError):
             return v
+
+
+def _ver_tuple(v):
+    try:
+        return tuple(int(x) for x in str(v).split("."))
+    except (TypeError, ValueError):
+        return (0,)
+
+
+def _ver_gt(a, b):
+    return _ver_tuple(a) > _ver_tuple(b)
 
 
 def build_pipeline():
@@ -1169,6 +1579,8 @@ def main():
                     help="窗口尺寸 WxH（测试用；默认自动=屏幕 92%% 封顶 1600x950）")
     ap.add_argument("--snap", default="",
                     help="自检：Qt 窗口显示 8 秒后原生截图到该路径并退出")
+    ap.add_argument("--serve-only", action="store_true",
+                    help="只起本地 HTTP 服务、不开窗口（UI 开发/无设备预览用）")
     args = ap.parse_args()
 
     dist = ROOT / "ui-web" / "dist"
@@ -1193,6 +1605,14 @@ def main():
             if r.startswith("FAIL"):
                 print("[shell] !! server 异常:", r, flush=True)
     threading.Thread(target=_watchdog, daemon=True, name="watchdog").start()
+
+    if args.serve_only:
+        print(f"[shell] serve-only：{url}（Ctrl+C 结束）", flush=True)
+        try:
+            while True:
+                time.sleep(3600)
+        except KeyboardInterrupt:
+            return
 
     if args.backend == "qt":
         try:

@@ -1,48 +1,51 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import Sidebar from './components/Sidebar.jsx'
 import Topbar from './components/Topbar.jsx'
 import BottomBar from './components/BottomBar.jsx'
-import CapturePage from './pages/CapturePage.jsx'
-import Scan3DPage from './pages/Scan3DPage.jsx'
-import TurntablePage from './pages/TurntablePage.jsx'
+import ScanPage from './pages/ScanPage.jsx'
 import FusionPage from './pages/FusionPage.jsx'
-import ToolboxPage from './pages/ToolboxPage.jsx'
 import SettingsPage from './pages/SettingsPage.jsx'
 import AboutPage from './pages/AboutPage.jsx'
 import { api } from './api.js'
-import { usePoll } from './hooks.jsx'
+import { Toast } from './ui.jsx'
 
 const PAGES = {
-  capture: CapturePage,
-  scan3d: Scan3DPage,
-  turntable: TurntablePage,
+  scan: ScanPage,
   fusion: FusionPage,
-  toolbox: ToolboxPage,
   settings: SettingsPage,
   about: AboutPage,
 }
 
+const ORDER = ['scan', 'fusion', 'settings', 'about']
+
 export default function App() {
-  const [page, setPage] = useState(() => location.hash.replace('#', '') || 'capture')
+  const [page, setPage] = useState(() => {
+    const h = location.hash.replace('#', '')
+    return PAGES[h] ? h : 'scan'
+  })
   const [theme, setTheme] = useState(() => {
     try { return localStorage.getItem('af-theme') || 'light' } catch (e) { return 'light' }
   })
-  const [state] = usePoll(api.state, 1500)
-  const [logs] = usePoll(api.logs, 2000)
-  const [toast, setToast] = useState(null)
+  const [state, setState] = useState(null)
+  const [logs, setLogs] = useState([])
+  const [toast, setToast] = useState('')
   const [recSec, setRecSec] = useState(0)
+  const toastTimer = useRef(null)
 
-  const status = {
-    device: !!(state && state.device && state.device.streaming),
-    rgb: !!(state && String(state.rgb).includes('已连接')),
-    fps: state ? state.fps || 0 : 0,
-  }
-  const rec = { on: !!(state && state.rec_continuous) }
-  const logList = logs ? logs.logs : []
-
-  const showToast = (msg, ms = 3400) => {
+  const showToast = (msg, ms = 3600) => {
     setToast(msg)
-    setTimeout(() => setToast(t => (t === msg ? null : t)), ms)
+    clearTimeout(toastTimer.current)
+    toastTimer.current = setTimeout(() => setToast(''), ms)
+  }
+
+  const reload = async () => {
+    try {
+      const s = await api.state()
+      setState(s)
+      return s
+    } catch (e) {
+      return null
+    }
   }
 
   useEffect(() => {
@@ -50,7 +53,35 @@ export default function App() {
     try { localStorage.setItem('af-theme', theme) } catch (e) {}
   }, [theme])
 
-  // 窗口存活心跳（Edge 多进程模型：Python 侧以此判定窗口关闭 → 收尾关红外）
+  // 状态轮询（1.5s）；页面切走后仍保留，顶栏/底栏不闪
+  useEffect(() => {
+    let alive = true
+    const tick = async () => {
+      try {
+        const s = await api.state()
+        if (alive) setState(s)
+      } catch (e) { /* 启动瞬间后端未就绪 */ }
+    }
+    tick()
+    const id = setInterval(tick, 1500)
+    return () => { alive = false; clearInterval(id) }
+  }, [])
+
+  // 日志轮询
+  useEffect(() => {
+    let alive = true
+    const tick = async () => {
+      try {
+        const r = await api.logs(20)
+        if (alive) setLogs(r.logs || [])
+      } catch (e) {}
+    }
+    tick()
+    const id = setInterval(tick, 2500)
+    return () => { alive = false; clearInterval(id) }
+  }, [])
+
+  // 窗口存活心跳（Qt 壳关闭 → Python 收尾关红外）
   useEffect(() => {
     const beat = () => fetch('/api/heartbeat', {
       method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}',
@@ -61,6 +92,10 @@ export default function App() {
   }, [])
 
   useEffect(() => {
+    if (location.hash !== '#' + page) history.replaceState(null, '', '#' + page)
+  }, [page])
+
+  useEffect(() => {
     const onHash = () => {
       const h = location.hash.replace('#', '')
       if (PAGES[h]) setPage(h)
@@ -69,43 +104,32 @@ export default function App() {
     return () => window.removeEventListener('hashchange', onHash)
   }, [])
 
+  // 连续采集计时
   useEffect(() => {
-    if (location.hash !== '#' + page) history.replaceState(null, '', '#' + page)
-  }, [page])
-
-  // REC 计时（后端 continuous 开 → 走秒）
-  useEffect(() => {
-    if (!rec.on) { setRecSec(0); return }
-    const id = setInterval(() => setRecSec(s => s + 1), 1000)
+    if (!(state && state.rec_continuous)) { setRecSec(0); return }
+    const id = setInterval(() => setRecSec((s) => s + 1), 1000)
     return () => clearInterval(id)
-  }, [rec.on])
+  }, [state && state.rec_continuous])
 
-  const Page = PAGES[page] || CapturePage
+  const Page = PAGES[page] || ScanPage
   const app = {
-    page, setPage, status, rec, recSec, state, showToast,
-    logs: logList,
-    addLog: showToast,
+    page, setPage, state, reload, logs, showToast, theme, setTheme,
+    version: state ? state.version : '',
   }
+  const rec = { on: !!(state && state.rec_continuous), sec: recSec }
+  const lastLog = logs.length ? logs[logs.length - 1] : ''
+
   return (
-    <div className="flex" style={{ height: '100vh' }}>
+    <div className="af-app">
       <Sidebar active={page} onChange={setPage} />
-      <div className="flex-1 flex flex-col min-w-0">
-        <Topbar status={status} theme={theme} onTheme={setTheme} />
-        <main className="flex-1 overflow-auto" style={{ padding: 12 }}>
+      <div className="af-main">
+        <Topbar state={state} version={app.version} onDeviceClick={() => setPage('scan')} />
+        <main className="af-content">
           <Page app={app} />
         </main>
-        <BottomBar rec={{ ...rec, sec: recSec }} task={logList[logList.length - 1] || ''}
-                    onFeedback={() => setPage('about')} />
+        <BottomBar rec={rec} task={lastLog} />
       </div>
-      {toast && (
-        <div style={{
-          position: 'fixed', left: '50%', top: 64, transform: 'translateX(-50%)',
-          background: 'var(--card)', color: 'var(--fg)', padding: '8px 18px',
-          borderRadius: 9, fontSize: 12.5, zIndex: 300, maxWidth: '70vw',
-          border: '1px solid var(--border-strong)', wordBreak: 'break-all',
-          textAlign: 'center', boxShadow: '0 8px 26px rgba(0,0,0,.35)',
-        }}>{toast}</div>
-      )}
+      <Toast msg={toast} />
     </div>
   )
 }
