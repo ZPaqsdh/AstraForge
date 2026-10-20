@@ -27,7 +27,7 @@ ROOT = Path(__file__).resolve().parent
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-APP_VERSION = "0.3.4"
+APP_VERSION = "0.3.5"
 
 # 应用级更新源（与 installer/setup_core.py 的 DEFAULT_UPDATE_URL 保持一致；
 # 测试可用 AF_UPDATE_URL 覆盖）。update.json 由 Release 的 latest/download 恒定入口提供。
@@ -431,9 +431,20 @@ def run_qt_window(url: str, bridge, snap_path=None, snap_delay=8.0,
     from PySide6.QtWidgets import QMessageBox
     _inst_lock = QSharedMemory("AstraForge-SingleInstance")
     if not _inst_lock.create(1):
+        # BUG-025 教训：老大双击了新版本，结果弹这个框、继续用旧窗口（旧界面 + 旧 API），
+        # 看起来像"新版本没修好"。所以这里主动把已有窗口拉到前台，并说清楚"它可能不是最新界面"。
+        try:
+            import ctypes
+            hwnd = ctypes.windll.user32.FindWindowW(None, "AstraForge 星铸")
+            if hwnd:
+                ctypes.windll.user32.ShowWindow(hwnd, 9)        # SW_RESTORE
+                ctypes.windll.user32.SetForegroundWindow(hwnd)
+        except Exception:
+            pass
         QMessageBox.warning(None, "AstraForge 星铸",
-                            "软件已经在运行了。\n\n请使用已打开的窗口；"
-                            "如需重新启动，请先关闭它。")
+                            "软件已经在运行，已为你切到那个窗口。\n\n"
+                            "注意：那个窗口是**更早启动的**，界面可能还是旧版本。\n"
+                            "要确认版本/看到这次修复：先把它完全关闭，再双击启动。")
         print("[shell] 检测到已有实例，本次启动退出", flush=True)
         return
 
@@ -668,6 +679,7 @@ class Bridge:
         self._upd = {"phase": "idle", "pct": 0, "msg": "", "path": "",
                      "latest": "", "error": None}
         self._scan_cache = (0.0, None)
+        self._scan_lock = threading.Lock()   # 枚举串行化：并发请求不叠加 PowerShell
         # 自动更新检测（启动即检 + 每 12h；不落盘 → 关闭重置）
         self._upd_watch = _UpdateWatcher(self)
         self._upd_watch.start()
@@ -707,7 +719,8 @@ class Bridge:
             st["device"]["connected"] = opened
             st["device"]["streaming"] = bool(opened and getattr(link, "stream_on", False))
             st["device"]["info"] = "2BC5:0403"
-            st["fps"] = round(_calc_fps(getattr(dev, "cap", None), _fps_meter_state), 1)
+            # 复位/重连瞬间计数器会被清零，算出来可能是负数 → 夹到 0，界面不显示 -27fps
+            st["fps"] = max(0.0, round(_calc_fps(getattr(dev, "cap", None), _fps_meter_state), 1))
         if rec is not None:
             st["export_dir"] = str(rec._out_dir())
             st["rec_continuous"] = bool(rec.continuous[0])
@@ -871,9 +884,16 @@ class Bridge:
         return out
 
     def _pnp_cameras(self, deep=False):
-        """只读枚举 2BC5 设备：默认 pyusb 快查；deep=True 走 PowerShell 查驱动绑定。"""
+        """只读枚举 2BC5 设备：默认 pyusb 快查；deep=True 走 PowerShell 查驱动绑定。
+
+        BUG-026：PowerShell 冷启动经常 >10s（或被安全软件拦），原来的 10s 超时
+        会直接判成"没有设备"——前端每 6 秒轮询一次 → 每次都卡 10 秒 + 结果还是
+        没设备，表现就是"重新检测永远找不到相机"。现在：
+        - 深查超时放宽到 25s；
+        - 深查失败时**回退到 pyusb 快查结果**，不把"查询失败"当成"设备不存在"。
+        """
+        fast = self._usb_cameras()
         if not deep:
-            fast = self._usb_cameras()
             if fast and fast.get("depth", {}).get("found"):
                 return fast
         import re as _re
@@ -882,11 +902,15 @@ class Bridge:
         try:
             r = subprocess.run(["powershell", "-NoProfile", "-NonInteractive",
                                 "-Command", self._PS_CAM],
-                               capture_output=True, timeout=10,
+                               capture_output=True, timeout=25,
                                creationflags=0x08000000)
             txt = (r.stdout or b"").decode("utf-8", "replace")
         except Exception as e:
             out["error"] = str(e)[:100]
+            if fast is not None:            # 深查失败 → 至少给 pyusb 的真实结论
+                fast = dict(fast)
+                fast["deep_failed"] = True
+                return fast
             return out
         for line in txt.splitlines():
             line = line.strip()
@@ -917,16 +941,34 @@ class Bridge:
         out["ok"] = True
         return out
 
-    def api_device_scan(self, deep=0, **kw):
+    def api_device_scan(self, deep=0, fast=0, **kw):
+        """设备枚举。
+
+        - `fast=1`：只走 pyusb（约 0.3s，不碰 PowerShell）——给前端后台轮询用，
+          拔掉设备时也立刻返回，不会把界面卡在"检测中"。
+        - `deep=1`：强制 PowerShell 深查（驱动绑定/服务名），用于「重新检测」。
+        默认：先快查，快查判不出（无设备/驱动冲突）再深查。
+        """
         deep = bool(str(deep).strip().lower() in ("1", "true", "yes", "on"))
+        fast_only = bool(str(fast).strip().lower() in ("1", "true", "yes", "on"))
         now = time.time()
         ts, cached = self._scan_cache
         if not deep and cached is not None and now - ts < 3.0:
             return cached
-        r = self._pnp_cameras(deep=deep)
-        if not deep:
-            self._scan_cache = (now, r)
-        return r
+        with self._scan_lock:               # 串行化：并发轮询不叠加子进程
+            if fast_only:
+                r = self._usb_cameras()
+                if r is None:
+                    r = {"ok": False, "fast": True,
+                         "depth": {"found": False, "state": "absent"},
+                         "color": {"found": False}, "devices": [],
+                         "error": "pyusb 未枚举到 2BC5 设备（可能没插、或被非 WinUSB 驱动占用）"}
+                self._scan_cache = (now, r)
+                return r
+            r = self._pnp_cameras(deep=deep)
+            if not deep:
+                self._scan_cache = (now, r)
+            return r
 
     def api_device_connect(self, **kw):
         dev = self._m("device")
@@ -961,6 +1003,50 @@ class Bridge:
             return {"ok": opened, "connected": opened,
                     "streaming": bool(opened and getattr(link, "stream_on", False)),
                     "error": "" if opened else "未找到设备（2BC5:0403），或驱动被占用/需要 WinUSB"}
+
+    def api_device_reset(self, **kw):
+        """USB 设备级复位（BUG-025）：只复位这台相机，不重启软件。
+
+        顺序：USB reset（端口重新枚举，红外必断）→ 释放句柄 → 等枚举 → 重新连接。
+        用于"深度流卡死 / 帧不动 / 关流没反应"——不用拔线，也不用重启程序。
+        """
+        dev = self._m("device")
+        if dev is None:
+            return {"ok": False, "error": "device 模块未装配（--no-pipeline 调试模式）"}
+        steps = []
+        with self._dev_lock:
+            link = getattr(dev, "link", None)
+            handle = getattr(link, "dev", None) if link is not None else None
+            if handle is not None:
+                try:
+                    handle.reset()          # libusb 端口复位：纯 USB 层，不发设备命令
+                    steps.append("usb-reset ok")
+                except Exception as e:      # noqa: BLE001
+                    steps.append(f"usb-reset 失败：{str(e)[:80]}")
+            else:
+                steps.append("没有已打开的句柄（仅做重新连接）")
+            try:
+                dev.stop()                  # 停线程 + 清资源（内部失败也会 reset 兜底）
+                steps.append("关闭流 ok")
+            except Exception as e:          # noqa: BLE001
+                steps.append(f"关闭流异常：{str(e)[:80]}")
+            time.sleep(1.2)                 # 等 Windows 重新枚举
+            dev.stop_evt = threading.Event()
+            dev.link = None
+            try:
+                dev.start()
+                steps.append("重新连接 ok")
+            except Exception as e:          # noqa: BLE001
+                steps.append(f"重新连接异常：{str(e)[:80]}")
+                return {"ok": False, "steps": steps, "error": str(e)[:160]}
+            link = getattr(dev, "link", None)
+            opened = bool(link is not None and getattr(link, "dev", None) is not None)
+            stream = bool(opened and getattr(link, "stream_on", False))
+        if self.pipeline:
+            self.pipeline.bus.publish(
+                "module.log", (f"[device] USB 复位完成（打开={opened} 流={stream}）", opened))
+        return {"ok": opened, "connected": opened, "streaming": stream, "steps": steps,
+                "error": "" if opened else "复位后仍打不开设备：检查线材/端口，或换一个 USB 口"}
 
     def api_device_disconnect(self, **kw):
         dev = self._m("device")
@@ -1436,22 +1522,48 @@ class Bridge:
 
     # ---------- 驱动库（随包 驱动工具/，程序内可修复/安装/支持新设备） ----------
     def api_driver_state(self, deep=0, **kw):
-        """设备 + 驱动判定 + 驱动库可用性。deep=1 强制重新枚举（绕过 3s 缓存）。"""
+        """设备 + 驱动判定 + 驱动库可用性。
+
+        deep=1 强制重新枚举（走 PowerShell 查驱动绑定，约 1–25s）；
+        deep=0 用 pyusb 快查（约 0.3s），页面打开/轮询不再被枚举拖住。
+        `blockers` 直接告诉界面"这个按钮为什么不能点"，避免出现一片灰按钮。
+        """
         from core import driverpack
-        scan = self.api_device_scan(deep=deep)
+        deep_on = bool(str(deep).strip().lower() in ("1", "true", "yes", "on"))
+        scan = self.api_device_scan(deep=1 if deep_on else 0,
+                                    fast=0 if deep_on else 1)
         depth = (scan or {}).get("depth") or {}
         vid = "2BC5"
         pid = str(depth.get("pid") or "")
         entry = driverpack.match_device(vid, pid) if pid else None
+        pack = driverpack.summary()
+        pack_ok = bool(pack.get("has_pack"))
+        zadig_ok = bool(pack.get("zadig_ok"))
+        blockers = {}
+        if not pack_ok:
+            blockers["pack"] = ("没有驱动库（驱动工具/manifest.json）——"
+                                "便携目录请把 installer/driver/pack 复制成 驱动工具/；"
+                                "安装版请重新运行安装器")
+        if not zadig_ok:
+            blockers["zadig"] = "驱动库里没有 zadig/zadig.exe（驱动向导不可用）"
+        if not depth.get("found"):
+            blockers["device"] = ("没枚举到 2BC5:0403（没插、线松，或驱动不是 WinUSB）——"
+                                  "插好后点「重新检测」")
+        elif not entry:
+            blockers["match"] = f"驱动库没有 2BC5:{pid} 的条目（这台机型未收录）"
         return {
             "scan": scan,
             "depth": depth,
-            "driver_pack": driverpack.summary(),
+            "driver_pack": pack,
             "matched": ({
                 "id": entry.get("id"), "name": entry.get("name"),
                 "method": entry.get("method"),
             } if entry else None),
-            "can_install": bool(entry) and driverpack.pack_dir() is not None,
+            "can_install": bool(entry) and pack_ok,
+            "pack_ok": pack_ok,
+            "zadig_ok": zadig_ok,
+            "deep": deep_on,
+            "blockers": blockers,
             "admin": driverpack.is_admin(),
         }
 

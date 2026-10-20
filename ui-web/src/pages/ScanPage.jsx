@@ -50,7 +50,8 @@ function ModeTabs({ mode, setMode }) {
   )
 }
 
-function DeviceConnect({ stage, scan, error, connecting, onConnect, onDetect, onDriverHelp, onDiagnose }) {
+function DeviceConnect({ stage, scan, error, connecting, onConnect, onDetect, onDriverHelp,
+  onDiagnose, onReset }) {
   const depth = (scan && scan.depth) || {}
   const model = depth.pid === '0403' ? 'ASTRA S Pro' : 'Astra 深度相机'
   if (stage === 'checking') {
@@ -114,6 +115,7 @@ function DeviceConnect({ stage, scan, error, connecting, onConnect, onDetect, on
           <div className="af-row center">
             <Btn primary icon={RefreshCw} onClick={onConnect}>重试</Btn>
             <Btn icon={RefreshCw} onClick={onDetect}>重新检测</Btn>
+            <Btn icon={Usb} onClick={onReset}>USB 复位</Btn>
             <Btn icon={Copy} onClick={onDiagnose}>复制诊断</Btn>
           </div>
         </div>
@@ -129,6 +131,7 @@ function DeviceConnect({ stage, scan, error, connecting, onConnect, onDetect, on
           <p>USB 链路已建立，深度流尚未启动。先断开再连接一次；如果反复失败，复制诊断发反馈。</p>
           <div className="af-row center">
             <Btn primary icon={RefreshCw} onClick={onConnect}>重新连接</Btn>
+            <Btn icon={Usb} onClick={onReset}>USB 复位</Btn>
             <Btn icon={Copy} onClick={onDiagnose}>复制诊断</Btn>
           </div>
         </div>
@@ -192,6 +195,7 @@ export default function ScanPage({ app }) {
   const [lastSaved, setLastSaved] = useState('')
   const [lastSession, setLastSession] = useState(null)
   const [modal, setModal] = useState(null)
+  const [diagText, setDiagText] = useState('')
   const [hintOpen, setHintOpen] = useState(true)
 
   const [qual] = usePoll(api.quality, 1200, !!(state && state.device && state.device.streaming))
@@ -215,10 +219,10 @@ export default function ScanPage({ app }) {
   const exportDir = (state && state.export_dir) || ''
   const mirrorSynced = useRef(false)
 
-  const refreshScan = async (silent = true, deep = false) => {
+  const refreshScan = async (silent = true, deep = false, fast = false) => {
     setScanning(true)
     try {
-      const r = await api.deviceScan(deep)
+      const r = await api.deviceScan({ deep, fast })
       setScan(r)
       return r
     } catch (e) {
@@ -238,9 +242,11 @@ export default function ScanPage({ app }) {
   }, [])
 
   // 未连接时每 6 秒重新枚举（插拔自动反映）
+  // BUG-026：后台轮询必须走 pyusb 快查（fast=1），否则拔掉设备后每次都要等
+  // PowerShell 超时 → 界面永远停在"检测中"，插回去也认不出来。
   useEffect(() => {
     if (streaming) return
-    const id = setInterval(() => { refreshScan() }, 6000)
+    const id = setInterval(() => { refreshScan(true, false, true) }, 6000)
     return () => clearInterval(id)
   }, [streaming])
 
@@ -358,9 +364,33 @@ export default function ScanPage({ app }) {
       const d = await api.diag()
       const text = JSON.stringify(d, null, 2)
       const ok = await copyText(text)
-      showToast(ok ? '诊断信息已复制到剪贴板' : '诊断已生成，但剪贴板不可用')
+      if (ok) {
+        showToast(`✓ 诊断已复制（${text.length} 字），可直接粘贴`, 5000)
+      } else {
+        setDiagText(text)
+        showToast('✗ 剪贴板不可用：已打开文本框，可手动全选复制', 6000)
+      }
     } catch (e) {
-      showToast(`✗ ${e.message || e}`)
+      showToast(`✗ ${e.message || e}`, 5000)
+    }
+  }
+
+  /** USB 设备级复位（BUG-025）：只复位相机，不重启软件。 */
+  const resetUsb = async () => {
+    setConnecting(true)
+    setConnectError('')
+    try {
+      const r = await api.deviceReset()
+      await reload()
+      showToast(r.ok
+        ? (r.streaming ? '✓ USB 复位完成，数据流已恢复' : '✓ USB 复位完成，设备已打开')
+        : `✗ ${r.error || '复位后仍打不开设备'}`, 7000)
+      refreshScan(true, true)
+    } catch (e) {
+      setConnectError(String(e.message || e))
+      showToast(`✗ USB 复位失败：${e.message || e}`, 7000)
+    } finally {
+      setConnecting(false)
     }
   }
 
@@ -755,7 +785,8 @@ export default function ScanPage({ app }) {
       ) : (
         <DeviceConnect stage={stage} scan={scan} error={connectError}
           connecting={connecting} onConnect={connect} onDetect={detect}
-          onDriverHelp={() => setPage('about')} onDiagnose={diagnose} />
+          onDriverHelp={() => setPage('about')} onDiagnose={diagnose}
+          onReset={resetUsb} />
       )}
 
       {modal === 'calib' ? (
@@ -789,6 +820,17 @@ export default function ScanPage({ app }) {
           <div className="af-modal-actions">
             <Btn onClick={() => setRange({ lo: '0', hi: '2500', busy: false })}>重置 0–2500</Btn>
             <Btn primary disabled={range.busy} onClick={applyRange}>应用</Btn>
+          </div>
+        </Modal>
+      ) : null}
+
+      {diagText ? (
+        <Modal title="诊断信息（手动复制）" onClose={() => setDiagText('')} width={640}>
+          <p className="af-modal-hint">剪贴板不可用，请点下面的框，Ctrl+A 全选后 Ctrl+C。</p>
+          <textarea className="af-diag-text" rows={14} value={diagText} readOnly
+            onFocus={(e) => e.target.select()} />
+          <div className="af-modal-actions">
+            <Btn onClick={() => setDiagText('')}>关闭</Btn>
           </div>
         </Modal>
       ) : null}

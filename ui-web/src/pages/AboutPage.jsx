@@ -10,6 +10,7 @@ import { api } from '../api.js'
 const MAIL = '1544648188z@gmail.com'
 
 const UPDATE_LOG = [
+  { version: 'v0.3.5', date: '2026-10-20', note: '驱动按钮不再哑灰（原因可见）、USB 复位、插拔重新识别、复制/邮箱反馈' },
   { version: 'v0.3.4', date: '2026-10-20', note: '驱动随包一体可自修、反馈交互重做、更新自动检测' },
   { version: 'v0.3.3', date: '2026-10-20', note: '导出模型左右边缘颗粒清理、预览竖线修复' },
   { version: 'v0.3.2', date: '2026-10-20', note: '深度预览右缘竖线修复（按方位裁垃圾带）' },
@@ -64,28 +65,45 @@ function friendlyUpdateError(msg) {
   return t
 }
 
-/** 复制按钮：点了**就地**变「已复制 ✓」（2s 复原）——老大反馈"没有任何反馈"的直接修法。 */
+/** 复制按钮：点了**就地**变「已复制 ✓」+ 旁边常驻一行结果（2s 后按钮复原，提示保留 6s）。
+ *
+ * BUG-025：老大反馈"点了没反馈"。原因有两层——① 只有 toast，容易被忽略/被窗口边缘裁掉；
+ * ② 按钮变「已复制」后 2 秒复原，慢一点看就什么都没有。现在三重反馈：
+ * 按钮文字变「已复制」+ 行内文字「已复制 N 字，可直接粘贴」+ toast，且**可以反复点**。
+ */
 function CopyBtn({ text, label, icon = Copy, showToast, small = true, primary = false }) {
   const [done, setDone] = useState(false)
+  const [msg, setMsg] = useState('')
   const timer = useRef(null)
+  const msgTimer = useRef(null)
   const go = async () => {
     const payload = typeof text === 'function' ? text() : text
     const ok = await copyText(payload)
+    clearTimeout(timer.current)
+    clearTimeout(msgTimer.current)
     if (!ok) {
-      showToast('✗ 复制失败：剪贴板不可用，可手动选中文本复制', 5000)
+      setDone(false)
+      setMsg('✗ 复制失败：剪贴板不可用，请手动选中文字复制')
+      showToast('✗ 复制失败：剪贴板不可用', 5000)
+      msgTimer.current = setTimeout(() => setMsg(''), 8000)
       return
     }
+    const n = String(payload == null ? '' : payload).length
     setDone(true)
-    clearTimeout(timer.current)
+    setMsg(`✓ 已复制 ${n} 字，可直接粘贴`)
     timer.current = setTimeout(() => setDone(false), 2000)
+    msgTimer.current = setTimeout(() => setMsg(''), 6000)
     showToast('✓ 已复制到剪贴板')
   }
-  useEffect(() => () => clearTimeout(timer.current), [])
+  useEffect(() => () => { clearTimeout(timer.current); clearTimeout(msgTimer.current) }, [])
   return (
-    <Btn small={small} primary={primary} icon={done ? Check : icon}
-      className={done ? 'ok' : ''} onClick={go}>
-      {done ? '已复制' : label}
-    </Btn>
+    <span className="af-copy-wrap">
+      <Btn small={small} primary={primary} icon={done ? Check : icon}
+        className={done ? 'ok' : ''} onClick={go}>
+        {done ? '已复制' : label}
+      </Btn>
+      {msg ? <span className={msg.startsWith('✓') ? 'af-copy-ok' : 'af-copy-bad'}>{msg}</span> : null}
+    </span>
   )
 }
 
@@ -292,6 +310,7 @@ export default function AboutPage({ app }) {
   const [drv, setDrv] = useState(null)          // {scan, depth, driver_pack, matched, can_install}
   const [scanning, setScanning] = useState(true)
   const [installing, setInstalling] = useState(false)
+  const [drvMsg, setDrvMsg] = useState('')
   const [diag, setDiag] = useState(null)
   const [feedbackOpen, setFeedbackOpen] = useState(false)
   const [mailOpen, setMailOpen] = useState(false)
@@ -306,17 +325,60 @@ export default function AboutPage({ app }) {
 
   const refreshDriver = async (deep = true) => {
     setScanning(true)
+    setDrvMsg('')
     try {
       const r = await api.driverState(deep)
       setDrv(r)
       const d = r.depth || {}
+      const b = r.blockers || {}
+      if (b.pack) setDrvMsg(b.pack)
+      else if (b.zadig) setDrvMsg(b.zadig)
       showToast(d.found
         ? `已检测：2BC5:${d.pid} · ${d.service || '无驱动'}`
-        : '未检测到 Astra 深度相机')
+        : '未枚举到 2BC5:0403 设备（点「重新检测」做深查）')
     } catch (e) {
-      showToast(`✗ ${e.message || e}`)
+      setDrvMsg(`检测失败：${e.message || e}`)
+      showToast(`✗ 检测失败：${e.message || e}`, 6000)
     } finally {
       setScanning(false)
+    }
+  }
+
+  /** 按钮可用性检查：不满足时**点了也会说清楚原因**（而不是一片灰、点了没反应）。 */
+  const guard = (reason, fn) => {
+    if (reason) {
+      setDrvMsg(reason)
+      showToast(`✗ ${reason}`, 8000)
+      return
+    }
+    fn()
+  }
+
+  const openDriverFolder = async () => {
+    try {
+      const r = await api.driverOpenFolder()
+      if (!r.ok) throw new Error(r.error || '打开失败')
+      setDrvMsg(`已打开：${r.path}`)
+    } catch (e) {
+      setDrvMsg(`打开失败：${e.message || e}`)
+      showToast(`✗ ${e.message || e}`, 6000)
+    }
+  }
+
+  const resetUsb = async () => {
+    setInstalling(true)
+    setDrvMsg('正在 USB 复位（约 2–4 秒）…')
+    try {
+      const r = await api.deviceReset()
+      setDrvMsg((r.steps || []).join(' · '))
+      showToast(r.ok ? (r.streaming ? '✓ USB 复位完成，流已恢复' : '✓ USB 复位完成，设备已打开')
+        : `✗ ${r.error || '复位后仍打不开设备'}`, 7000)
+      await refreshDriver(true)
+    } catch (e) {
+      setDrvMsg(`复位失败：${e.message || e}`)
+      showToast(`✗ 复位失败：${e.message || e}`, 7000)
+    } finally {
+      setInstalling(false)
     }
   }
 
@@ -372,6 +434,8 @@ export default function AboutPage({ app }) {
   const depth = drv?.depth || {}
   const pack = drv?.driver_pack || {}
   const matched = drv?.matched || null
+  const blockers = drv?.blockers || {}
+  const blockKeys = ['pack', 'zadig', 'device', 'match'].filter((k) => blockers[k])
   const driverState = depth.state === 'ready' ? 'ok'
     : depth.state === 'conflict' ? 'warn' : depth.found ? 'warn' : ''
 
@@ -475,21 +539,20 @@ export default function AboutPage({ app }) {
               <Btn small icon={RefreshCw} onClick={() => refreshDriver(true)} disabled={scanning}>
                 {scanning ? '检测中…' : '重新检测'}
               </Btn>
-              <Btn small primary icon={Wrench} disabled={!drv?.can_install || installing}
-                title={drv?.can_install ? '' : '插好相机或补全驱动库后才能安装'}
-                onClick={installDriver}>
+              <Btn small primary icon={Wrench} disabled={installing}
+                onClick={() => guard(blockers.device || blockers.match || blockers.pack,
+                  installDriver)}>
                 {installing ? '安装中…' : (depth.state === 'ready' ? '修复驱动' : '安装驱动')}
               </Btn>
-              <Btn small icon={Usb} disabled={!pack.zadig_ok}
-                title={pack.zadig_ok ? '' : '随包驱动工具缺失'}
-                onClick={openZadig}>
+              <Btn small icon={Usb} onClick={() => guard(blockers.zadig, openZadig)}>
                 驱动向导
               </Btn>
-              <Btn small icon={FolderOpen} disabled={!pack.has_pack}
-                onClick={() => api.driverOpenFolder()
-                  .then((r) => { if (!r.ok) throw new Error(r.error) })
-                  .catch((e) => showToast(`✗ ${e.message || e}`))}>
+              <Btn small icon={FolderOpen}
+                onClick={() => guard(blockers.pack, openDriverFolder)}>
                 驱动文件夹
+              </Btn>
+              <Btn small icon={Cpu} onClick={() => guard(blockers.device, resetUsb)}>
+                USB 复位
               </Btn>
               <Btn small icon={FolderOpen} onClick={() => openExe(paths?.root, '程序目录')}>程序目录</Btn>
               <Btn small danger icon={Trash2} disabled={!paths?.uninstaller}
@@ -497,11 +560,20 @@ export default function AboutPage({ app }) {
                 卸载
               </Btn>
             </div>
+            {/* BUG-025：不可用的原因必须写在脸上，不能只留一片灰按钮 */}
+            {blockKeys.length ? (
+              <div className="af-block-list">
+                {blockKeys.map((k) => (
+                  <div key={k} className="af-block-item">✗ {blockers[k]}</div>
+                ))}
+              </div>
+            ) : null}
             <div className="af-hint">
               {matched
                 ? `已匹配驱动条目：${matched.name}（${matched.method === 'pnputil-inf' ? '签名 INF · 自动安装' : '需 Zadig 向导'}）`
                 : '深度 2BC5:0403 需要 WinUSB；彩色 2BC5:0501 为 UVC，系统相机可直接识别。'}
               驱动切换会短暂断开设备，完成后回到「三维扫描」重新连接。
+              {drvMsg ? <b className="af-drv-msg"> · {drvMsg}</b> : null}
             </div>
           </Section>
 
@@ -511,9 +583,15 @@ export default function AboutPage({ app }) {
               （版本 / 系统 / 设备 / 模块 / 最近日志），提交前可自行检查。
             </p>
             <div className="af-feedback-actions">
-              <Btn primary icon={Send} onClick={() => setFeedbackOpen(true)}>反馈问题</Btn>
+              <Btn primary icon={Send} onClick={() => {
+                setFeedbackOpen(true)
+                showToast('已打开反馈窗口：填标题后点「生成 Issue 草稿」', 3500)
+              }}>反馈问题</Btn>
               <CopyBtn text={() => fmtDiag(diag)} label="复制诊断" showToast={showToast} />
-              <Btn icon={Mail} onClick={() => setMailOpen(true)}>邮箱</Btn>
+              <Btn icon={Mail} onClick={() => {
+                setMailOpen(true)
+                showToast(`已打开邮箱反馈窗口：${MAIL}`, 3500)
+              }}>邮箱</Btn>
               <Btn icon={GitBranch} onClick={async () => {
                 try {
                   const r = await api.openUrl(`${GH}/issues/new/choose`)

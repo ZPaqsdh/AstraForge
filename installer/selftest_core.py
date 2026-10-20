@@ -56,7 +56,7 @@ def main():
 
     # ② 静默安装
     r = subprocess.run([PY, str(setup), '--silent', '--test-root', str(sb_root),
-                        '--version', '0.3.4', '--dir', str(sb_root / 'install')],
+                        '--version', '0.3.5', '--dir', str(sb_root / 'install')],
                        capture_output=True, text=True, env=env, timeout=180)
     out = (r.stdout or '') + (r.stderr or '')
     ok2 = r.returncode == 0 and '"ok": true' in out

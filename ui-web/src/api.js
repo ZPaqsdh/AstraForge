@@ -22,9 +22,15 @@ export const api = {
   pixel: (x, y) => req(`/api/pixel?x=${x}&y=${y}`),
 
   // 设备
-  deviceScan: (deep = false) => req(`/api/device_scan${deep ? '?deep=1' : ''}`),
+  deviceScan: (opts = {}) => {
+    // 兼容旧调用 deviceScan(true) 与新的 { deep, fast }
+    const o = typeof opts === 'boolean' ? { deep: opts } : (opts || {})
+    const q = [o.deep ? 'deep=1' : '', o.fast ? 'fast=1' : ''].filter(Boolean).join('&')
+    return req(`/api/device_scan${q ? '?' + q : ''}`)
+  },
   deviceConnect: () => req('/api/device_connect', 'POST', {}),
   deviceDisconnect: () => req('/api/device_disconnect', 'POST', {}),
+  deviceReset: () => req('/api/device_reset', 'POST', {}),
 
   // 采集
   saveSnapshot: () => req('/api/save_snapshot', 'POST', {}),
