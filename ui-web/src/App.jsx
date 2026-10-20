@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { Download } from 'lucide-react'
 import Sidebar from './components/Sidebar.jsx'
 import Topbar from './components/Topbar.jsx'
 import BottomBar from './components/BottomBar.jsx'
@@ -30,6 +31,8 @@ export default function App() {
   const [logs, setLogs] = useState([])
   const [toast, setToast] = useState('')
   const [recSec, setRecSec] = useState(0)
+  const [upd, setUpd] = useState(null)          // 自动更新状态（后端 4s 首检 / 12h 周期）
+  const [dismissed, setDismissed] = useState([]) // 本次运行已关掉的版本（不落盘 → 关闭重置）
   const toastTimer = useRef(null)
 
   const showToast = (msg, ms = 3600) => {
@@ -111,19 +114,52 @@ export default function App() {
     return () => clearInterval(id)
   }, [state && state.rec_continuous])
 
+  // 自动更新状态（后端启动 4s 后首检、每 12h 一次；这里只做轻轮询）
+  useEffect(() => {
+    let alive = true
+    const tick = async () => {
+      try {
+        const u = await api.updateState()
+        if (alive) setUpd(u)
+      } catch (e) { /* 后端未就绪 */ }
+    }
+    tick()
+    const id = setInterval(tick, 20000)
+    return () => { alive = false; clearInterval(id) }
+  }, [])
+
+  const hasUpdate = !!(upd && upd.has_update)
+  const bannerOn = hasUpdate && !dismissed.includes(upd.latest)
+
   const Page = PAGES[page] || ScanPage
   const app = {
     page, setPage, state, reload, logs, showToast, theme, setTheme,
     version: state ? state.version : '',
+    update: upd,
+    refreshUpdate: async () => {
+      try { const u = await api.updateState(); setUpd(u); return u } catch (e) { return null }
+    },
   }
   const rec = { on: !!(state && state.rec_continuous), sec: recSec }
   const lastLog = logs.length ? logs[logs.length - 1] : ''
 
   return (
     <div className="af-app">
-      <Sidebar active={page} onChange={setPage} />
+      <Sidebar active={page} onChange={setPage} hasUpdate={hasUpdate} />
       <div className="af-main">
         <Topbar state={state} version={app.version} onDeviceClick={() => setPage('scan')} />
+        {bannerOn ? (
+          <div className="af-update-banner">
+            <Download size={14} />
+            <span>发现新版本 <b>v{upd.latest}</b>（当前 v{upd.current}）</span>
+            <button className="af-update-banner-go"
+              onClick={() => { setPage('about'); setDismissed((d) => [...d, upd.latest]) }}>
+              查看更新
+            </button>
+            <button className="af-update-banner-x" title="本次运行不再提示"
+              onClick={() => setDismissed((d) => [...d, upd.latest])}>×</button>
+          </div>
+        ) : null}
         <main className="af-content">
           <Page app={app} />
         </main>

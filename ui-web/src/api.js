@@ -82,6 +82,16 @@ export const api = {
   updateDownload: (url, sha256, latest) => req('/api/update_download', 'POST', { url, sha256, latest }),
   updateStatus: () => req('/api/update_status'),
   updateApply: () => req('/api/update_apply', 'POST', {}),
+  // 自动检测（启动即检 + 每 12h；关闭后重置）
+  updateState: () => req('/api/update_state'),
+  updateCheckNow: () => req('/api/update_check_now', 'POST', {}),
+
+  // 驱动库（随包 驱动工具/，程序内可修复/安装）
+  driverState: (deep = false) => req(`/api/driver_state${deep ? '?deep=1' : ''}`),
+  driverManifest: () => req('/api/driver_manifest'),
+  driverInstall: (driverId = '') => req('/api/driver_install', 'POST', { driver_id: driverId }),
+  driverOpenTool: () => req('/api/driver_open_tool', 'POST', {}),
+  driverOpenFolder: () => req('/api/driver_open_folder', 'POST', {}),
 
   // 收尾
   shutdown: () => req('/api/shutdown', 'POST', {}),

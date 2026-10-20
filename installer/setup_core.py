@@ -585,11 +585,13 @@ def download_file(url: str, dest: Path, sha256: str = '', cb=None, cancel=None) 
 
 # ---------------------------------------------------------------- 驱动库
 def driver_pack_dir() -> Path | None:
-    """驱动库目录：onefile 的 _MEIPASS/driver_pack → 源码 installer/driver/pack。"""
+    """驱动库目录：onefile 的 _MEIPASS/driver_pack → 源码 installer/driver/pack
+    → 安装根 `驱动工具/`（BUG-024：装完长期保留的那份）。"""
     cands = [
         Path(getattr(sys, '_MEIPASS', Path(__file__).resolve().parent)) / 'driver_pack',
         Path(__file__).resolve().parent / 'driver' / 'pack',
         Path(sys.executable).resolve().parent / 'driver_pack',
+        Path(sys.executable).resolve().parent / '驱动工具',
     ]
     for c in cands:
         try:
@@ -666,13 +668,34 @@ def install_driver(driver_id: str) -> dict:
 
 
 def driver_tool_path() -> str:
-    """驱动工具（Zadig）：安装包根 `驱动工具\\zadig.exe`；源码布局回退 installer/driver。"""
+    """驱动工具（Zadig）绝对路径。
+
+    BUG-024（2026-10-20）：随包布局是 `驱动工具/zadig/zadig.exe`（**多一层 `zadig/`**），
+    旧实现只找 `驱动工具/zadig.exe` → 永远找不到 → 「打开驱动工具」只弹"未找到"。
+    现在优先读 `manifest.json` 的 `tools.zadig`，其余候选只为老包兼容；
+    候选顺序与 `core/driverpack.py` 保持一致（probe74 强制校验）。
+    """
+    pack = driver_pack_dir()
+    if pack:
+        try:
+            man = json.loads((pack / 'manifest.json').read_text(encoding='utf-8'))
+            rel = str((man.get('tools') or {}).get('zadig') or '').strip()
+            if rel:
+                p = (pack / rel).resolve()
+                if p.exists():
+                    return str(p)
+        except Exception:
+            pass
     exe_dir = Path(sys.executable).resolve().parent
     meipass = Path(getattr(sys, '_MEIPASS', Path(__file__).resolve().parent))
     cands = [
-        exe_dir / '驱动工具' / 'zadig.exe',
+        exe_dir / '驱动工具' / 'zadig' / 'zadig.exe',      # 安装根（真实布局）
+        exe_dir / '驱动工具' / 'zadig.exe',                # 老布局兼容
+        exe_dir / '驱动工具' / 'zadig' / 'x64' / 'zadig.exe',
+        meipass / '驱动工具' / 'zadig' / 'zadig.exe',
         meipass / '驱动工具' / 'zadig.exe',
         meipass / 'driver_pack' / 'zadig' / 'zadig.exe',
+        meipass / 'driver_pack' / 'zadig.exe',
         Path(__file__).resolve().parent / 'driver' / 'pack' / 'zadig' / 'zadig.exe',
         Path(__file__).resolve().parent / 'driver' / 'zadig.exe',
         exe_dir / 'driver' / 'zadig.exe',
@@ -684,6 +707,43 @@ def driver_tool_path() -> str:
         except Exception:
             pass
     return ''
+
+
+def ensure_depth_driver(auto_install: bool = True) -> dict:
+    """安装流程"驱动准备"步：设备在但驱动不对 → 当场装（失败不阻塞主安装）。
+
+    返回 {ok, skipped?, already?, guided?, driver_id?, msg, ...install_driver 结果}
+    """
+    if not IS_WIN:
+        return {'ok': False, 'skipped': True, 'msg': '非 Windows，跳过驱动准备'}
+    try:
+        info = detect_cameras()
+    except Exception as e:  # noqa: BLE001
+        return {'ok': False, 'msg': f'设备枚举失败：{e}'}
+    depth = (info or {}).get('depth') or {}
+    if not depth.get('found'):
+        return {'ok': False, 'skipped': True,
+                'msg': '未检测到深度相机；装好后插上，可在软件「关于与更新」里一键安装驱动'}
+    if depth.get('state') == 'ready':
+        return {'ok': True, 'skipped': True, 'already': True,
+                'msg': f"驱动已就绪（{depth.get('service') or 'WinUSB'}）"}
+    pid = str(depth.get('pid') or '')
+    entry = match_driver('2BC5', pid)
+    if not entry:
+        return {'ok': False, 'msg': f'驱动库没有匹配 2BC5:{pid} 的条目'}
+    did = str(entry.get('id') or '')
+    method = str(entry.get('method') or '')
+    state = str(depth.get('state') or '')
+    if method == 'zadig-guided' or state == 'conflict':
+        return {'ok': False, 'guided': True, 'driver_id': did,
+                'zadig': driver_tool_path(),
+                'msg': '该设备需要用驱动向导（Zadig）切换驱动'}
+    if not auto_install:
+        return {'ok': False, 'pending': True, 'driver_id': did,
+                'msg': '检测到设备，已跳过自动安装（可在软件内安装）'}
+    r = install_driver(did)
+    r['driver_id'] = did
+    return r
 
 
 def _extract_retry(z: zipfile.ZipFile, name: str, target: Path, tries: int = 4, delay: float = 0.6):
@@ -791,6 +851,23 @@ def install(opts: dict, cb=None, cancel=None, sb: Sandbox | None = None) -> dict
         _rollback(created, target)
         return {'ok': False, 'msg': f'解压失败：{e}', 'created': created}
 
+    # 2.5) 驱动准备（BUG-024：老大口径"安装时没驱动就装上"）
+    #      失败/跳过都**不阻塞主安装**，事后可在软件「关于与更新」里一键修复。
+    driver_result = None
+    if opts.get('drivers', True) and not getattr(sb, 'on', False):
+        step(76, '正在检查深度相机驱动…')
+        try:
+            driver_result = ensure_depth_driver(auto_install=True)
+        except Exception as e:  # noqa: BLE001
+            driver_result = {'ok': False, 'msg': f'驱动检查异常：{e}'}
+        try:
+            msg = str(driver_result.get('msg') or '')
+            if driver_result.get('guided'):
+                msg = '驱动需要 Zadig 向导（安装完成后可在软件内打开）'
+            step(78, msg or '驱动稍后可安装')
+        except Exception:
+            pass
+
     # 3) 快捷方式
     exe = target / APP_EXE
     lnk_name = f'{APP_CN}.lnk'
@@ -842,13 +919,13 @@ def install(opts: dict, cb=None, cancel=None, sb: Sandbox | None = None) -> dict
             'app': APP_NAME, 'version': version, 'dir': str(target),
             'installed_at': time.strftime('%Y-%m-%d %H:%M:%S'),
             'updated_from': prev_version if prev_version and prev_version != version else '',
-            'options': {k: opts.get(k) for k in ('desktop', 'startmenu', 'autostart')},
+            'options': {k: opts.get(k) for k in ('desktop', 'startmenu', 'autostart', 'drivers')},
             'payload': payload.name}, ensure_ascii=False, indent=2), encoding='utf-8')
     except Exception:
         pass
     cb(100, '安装完成')
     return {'ok': True, 'msg': '安装完成', 'dir': str(target), 'version': version,
-            'created': created}
+            'created': created, 'driver': driver_result}
 
 
 def _rollback(created: list[str], target: Path):

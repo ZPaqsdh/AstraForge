@@ -2,17 +2,19 @@ import { useEffect, useRef, useState } from 'react'
 import {
   RefreshCw, Download, Check, AlertTriangle, FolderOpen, Usb, Trash2,
   Copy, Mail, GitBranch, Bug, ExternalLink, Package, ShieldCheck,
-  Send, Cpu, HardDrive,
+  Send, Cpu, HardDrive, Wrench,
 } from 'lucide-react'
 import { Btn, Section, Modal, Pill, Field } from '../ui.jsx'
 import { api } from '../api.js'
 
+const MAIL = '1544648188z@gmail.com'
+
 const UPDATE_LOG = [
+  { version: 'v0.3.4', date: '2026-10-20', note: '驱动随包一体可自修、反馈交互重做、更新自动检测' },
   { version: 'v0.3.3', date: '2026-10-20', note: '导出模型左右边缘颗粒清理、预览竖线修复' },
   { version: 'v0.3.2', date: '2026-10-20', note: '深度预览右缘竖线修复（按方位裁垃圾带）' },
   { version: 'v0.3.1', date: '2026-10-19', note: '成像方向纠正：导出无镜像，镜像只影响预览' },
   { version: 'v0.3.0', date: '2026-10-19', note: '四导航 UI 重做、应用内更新与反馈' },
-  { version: '安装器 v4', date: '2026-10-18', note: '单文件双形态、驱动库、轻量卸载器' },
 ]
 
 const GH = 'https://github.com/ZPaqsdh/AstraForge'
@@ -62,8 +64,60 @@ function friendlyUpdateError(msg) {
   return t
 }
 
+/** 复制按钮：点了**就地**变「已复制 ✓」（2s 复原）——老大反馈"没有任何反馈"的直接修法。 */
+function CopyBtn({ text, label, icon = Copy, showToast, small = true, primary = false }) {
+  const [done, setDone] = useState(false)
+  const timer = useRef(null)
+  const go = async () => {
+    const payload = typeof text === 'function' ? text() : text
+    const ok = await copyText(payload)
+    if (!ok) {
+      showToast('✗ 复制失败：剪贴板不可用，可手动选中文本复制', 5000)
+      return
+    }
+    setDone(true)
+    clearTimeout(timer.current)
+    timer.current = setTimeout(() => setDone(false), 2000)
+    showToast('✓ 已复制到剪贴板')
+  }
+  useEffect(() => () => clearTimeout(timer.current), [])
+  return (
+    <Btn small={small} primary={primary} icon={done ? Check : icon}
+      className={done ? 'ok' : ''} onClick={go}>
+      {done ? '已复制' : label}
+    </Btn>
+  )
+}
+
+/** 邮箱反馈：软件内弹窗显示地址 + 一键复制（不再落到浏览器）。 */
+function MailDialog({ diag, onClose, showToast }) {
+  return (
+    <Modal title="邮箱反馈" onClose={onClose} width={540}>
+      <p className="af-section-copy">
+        把问题发到这个邮箱即可。建议带上诊断信息（版本 / 系统 / 设备 / 最近日志），定位会快很多。
+      </p>
+      <div className="af-mail-addr" title="选中后可 Ctrl+C">{MAIL}</div>
+      <div className="af-row wrap">
+        <CopyBtn text={MAIL} label="复制邮箱" showToast={showToast} />
+        <CopyBtn primary
+          text={() => `收件人：${MAIL}\n\n【问题描述】\n（做了什么、期望什么、实际发生了什么）\n\n【诊断信息】\n${fmtDiag(diag)}`}
+          label="复制邮箱 + 诊断" showToast={showToast} />
+      </div>
+      <div className="af-hint">
+        本机没装邮件客户端时，系统会把邮件链接交给浏览器（网页版邮箱）；所以这里默认只复制，不自动跳转。
+        需要的话也可以用
+        <button className="af-link" onClick={() => api.openUrl(
+          `mailto:${MAIL}?subject=${encodeURIComponent('[AstraForge] 反馈')}`
+            + `&body=${encodeURIComponent(fmtDiag(diag))}`,
+        ).catch(() => showToast('✗ 系统没有可用的邮件处理程序', 5000))}>系统邮件打开</button>。
+      </div>
+    </Modal>
+  )
+}
+
 function UpdateCard({ app, onChanged }) {
   const { showToast } = app
+  const auto = app.update || null
   const [phase, setPhase] = useState('idle')     // idle|checking|result|downloading|downloaded|error
   const [info, setInfo] = useState(null)
   const [st, setSt] = useState(null)
@@ -221,7 +275,11 @@ function UpdateCard({ app, onChanged }) {
           {phase === 'checking' ? '检查中…' : '检查更新'}
         </Btn>
         <span className="af-hint">上次检查：{checkedAt || '—'}</span>
-        <span className="af-hint">更新源：GitHub Releases</span>
+        <span className="af-hint">
+          自动检测：启动时 + 每 12 小时
+          {auto?.checked_at ? ` · 最近 ${String(auto.checked_at).slice(11, 16)}` : ''}
+          {auto?.next_check_at ? ` · 下次 ${String(auto.next_check_at).slice(11, 16)}` : ''}
+        </span>
       </div>
     </Section>
   )
@@ -231,10 +289,12 @@ export default function AboutPage({ app }) {
   const { showToast } = app
   const [about, setAbout] = useState(null)
   const [paths, setPaths] = useState(null)
-  const [scan, setScan] = useState(null)
+  const [drv, setDrv] = useState(null)          // {scan, depth, driver_pack, matched, can_install}
   const [scanning, setScanning] = useState(true)
+  const [installing, setInstalling] = useState(false)
   const [diag, setDiag] = useState(null)
   const [feedbackOpen, setFeedbackOpen] = useState(false)
+  const [mailOpen, setMailOpen] = useState(false)
   const [fb, setFb] = useState({ type: 'Bug', title: '', body: '', withDiag: true })
 
   const load = async () => {
@@ -244,18 +304,48 @@ export default function AboutPage({ app }) {
     } catch (e) { /* 启动瞬间 */ }
   }
 
-  const refreshDriver = async () => {
+  const refreshDriver = async (deep = true) => {
     setScanning(true)
     try {
-      const r = await api.deviceScan(true)
-      setScan(r)
-      showToast(r.depth?.found
-        ? `已检测：2BC5:${r.depth.pid} · ${r.depth.service || '无驱动'}`
-        : '未检测到 Astra 设备')
+      const r = await api.driverState(deep)
+      setDrv(r)
+      const d = r.depth || {}
+      showToast(d.found
+        ? `已检测：2BC5:${d.pid} · ${d.service || '无驱动'}`
+        : '未检测到 Astra 深度相机')
     } catch (e) {
       showToast(`✗ ${e.message || e}`)
     } finally {
       setScanning(false)
+    }
+  }
+
+  const installDriver = async () => {
+    setInstalling(true)
+    try {
+      const r = await api.driverInstall(drv?.matched?.id || '')
+      if (r.ok) {
+        showToast(r.elevated ? '已请求管理员权限，确认后点「重新检测」' : '✓ 驱动已安装', 6000)
+      } else if (r.guided) {
+        showToast('该设备需用驱动向导（Zadig）切换，点「驱动向导」', 6000)
+      } else {
+        showToast(`✗ ${r.error || r.msg || '驱动安装失败'}`, 6000)
+      }
+      await refreshDriver(true)
+    } catch (e) {
+      showToast(`✗ ${e.message || e}`, 5000)
+    } finally {
+      setInstalling(false)
+    }
+  }
+
+  const openZadig = async () => {
+    try {
+      const r = await api.driverOpenTool()
+      if (!r.ok) throw new Error(r.error || '打开失败')
+      showToast('已打开驱动向导（Zadig）')
+    } catch (e) {
+      showToast(`✗ ${e.message || e}`, 6000)
     }
   }
 
@@ -266,11 +356,11 @@ export default function AboutPage({ app }) {
     const tick = async (attempt = 0) => {
       setScanning(true)
       try {
-        const r = await api.deviceScan()
+        const r = await api.driverState(attempt > 0)
         if (!alive) return
-        setScan(r)
+        setDrv(r)
         setScanning(false)
-        if (!r.depth?.found && attempt < 2) setTimeout(() => { if (alive) tick(attempt + 1) }, 2500)
+        if (!(r.depth || {}).found && attempt < 2) setTimeout(() => { if (alive) tick(attempt + 1) }, 2500)
       } catch (e) {
         if (alive) setScanning(false)
       }
@@ -279,14 +369,11 @@ export default function AboutPage({ app }) {
     return () => { alive = false }
   }, [])
 
-  const depth = scan?.depth || {}
+  const depth = drv?.depth || {}
+  const pack = drv?.driver_pack || {}
+  const matched = drv?.matched || null
   const driverState = depth.state === 'ready' ? 'ok'
     : depth.state === 'conflict' ? 'warn' : depth.found ? 'warn' : ''
-
-  const copyDiag = async () => {
-    const ok = await copyText(fmtDiag(diag))
-    showToast(ok ? '诊断信息已复制到剪贴板' : '诊断已生成，但剪贴板不可用')
-  }
 
   const submitFeedback = async () => {
     if (!fb.title.trim()) { showToast('标题不能为空'); return }
@@ -361,12 +448,13 @@ export default function AboutPage({ app }) {
               <b className="af-mono ellipsis" title={paths?.root}>{paths?.root || '—'}</b></div>
             <div className="af-kv"><span>导出目录</span>
               <b className="af-mono ellipsis" title={paths?.export}>{paths?.export || '—'}</b></div>
+
             <div className="af-driver-box">
               <div className="af-driver-head">
                 <span className={`af-dot ${driverState === 'ok' ? 'ok' : driverState === 'warn' ? 'idle' : 'idle'}`} />
                 <b>{depth.found ? `Astra 2BC5:${depth.pid}` : scanning ? '正在枚举设备…' : '未检测到深度相机'}</b>
                 <Pill tone={driverState === 'ok' ? 'ok' : driverState === 'warn' ? 'warn' : ''}>
-                  {scanning ? '检测中' : depth.state === 'ready' ? 'WinUSB' : depth.state === 'conflict' ? '需要切换' :
+                  {scanning ? '检测中' : depth.state === 'ready' ? 'WinUSB 就绪' : depth.state === 'conflict' ? '需要切换' :
                     depth.state === 'nodriver' ? '无驱动' : depth.found ? '未知驱动' : '未连接'}
                 </Pill>
               </div>
@@ -375,38 +463,66 @@ export default function AboutPage({ app }) {
                   ? `${depth.instance || ''} · 服务 ${depth.service || '—'} · 状态 ${depth.status || '—'}`
                   : '插好相机后点「重新检测」；深度相机需要 WinUSB。'}
               </div>
+              <div className="af-driver-meta">
+                驱动库：{pack.has_pack
+                  ? `${pack.devices?.length || 0} 个机型 · ${pack.devices?.map((x) => x.name).join(' / ') || '—'}`
+                  : '未找到（请重新运行安装器）'}
+                {pack.has_pack && !pack.zadig_ok ? ' · 驱动向导缺失' : ''}
+              </div>
             </div>
+
             <div className="af-row wrap">
-              <Btn small icon={RefreshCw} onClick={refreshDriver}>重新检测</Btn>
-              <Btn small icon={Usb} onClick={() => openExe(paths?.driver_tool, '驱动工具（Zadig）')}>
-                打开驱动工具
+              <Btn small icon={RefreshCw} onClick={() => refreshDriver(true)} disabled={scanning}>
+                {scanning ? '检测中…' : '重新检测'}
               </Btn>
-              <Btn small icon={FolderOpen} onClick={() => openExe(paths?.root, '程序目录')}>打开程序目录</Btn>
+              <Btn small primary icon={Wrench} disabled={!drv?.can_install || installing}
+                title={drv?.can_install ? '' : '插好相机或补全驱动库后才能安装'}
+                onClick={installDriver}>
+                {installing ? '安装中…' : (depth.state === 'ready' ? '修复驱动' : '安装驱动')}
+              </Btn>
+              <Btn small icon={Usb} disabled={!pack.zadig_ok}
+                title={pack.zadig_ok ? '' : '随包驱动工具缺失'}
+                onClick={openZadig}>
+                驱动向导
+              </Btn>
+              <Btn small icon={FolderOpen} disabled={!pack.has_pack}
+                onClick={() => api.driverOpenFolder()
+                  .then((r) => { if (!r.ok) throw new Error(r.error) })
+                  .catch((e) => showToast(`✗ ${e.message || e}`))}>
+                驱动文件夹
+              </Btn>
+              <Btn small icon={FolderOpen} onClick={() => openExe(paths?.root, '程序目录')}>程序目录</Btn>
               <Btn small danger icon={Trash2} disabled={!paths?.uninstaller}
                 onClick={() => openExe(paths?.uninstaller, '卸载器')}>
                 卸载
               </Btn>
             </div>
             <div className="af-hint">
-              深度 2BC5:0403 需要 WinUSB；彩色 2BC5:0501 为 UVC，系统相机可直接识别。
-              驱动切换会短暂断开设备，切换后回到「三维扫描」重新连接。
+              {matched
+                ? `已匹配驱动条目：${matched.name}（${matched.method === 'pnputil-inf' ? '签名 INF · 自动安装' : '需 Zadig 向导'}）`
+                : '深度 2BC5:0403 需要 WinUSB；彩色 2BC5:0501 为 UVC，系统相机可直接识别。'}
+              驱动切换会短暂断开设备，完成后回到「三维扫描」重新连接。
             </div>
           </Section>
 
           <Section title="反馈与诊断" aside={<Bug size={15} />}>
             <p className="af-section-copy">
-              反馈会附带诊断信息（系统 / 设备 / 模块 / 最近日志）。提交前会打开 GitHub Issue 预填页，
-              可在浏览器里确认后提交；也可以复制诊断贴到邮件里。
+              反馈可走 GitHub Issue（自动预填）或邮箱（{MAIL}）。两种方式都可以附带诊断信息
+              （版本 / 系统 / 设备 / 模块 / 最近日志），提交前可自行检查。
             </p>
             <div className="af-feedback-actions">
               <Btn primary icon={Send} onClick={() => setFeedbackOpen(true)}>反馈问题</Btn>
-              <Btn icon={Copy} onClick={copyDiag}>复制诊断</Btn>
-              <Btn icon={Mail} onClick={() => api.openUrl(
-                `mailto:1544648188z@gmail.com?subject=${encodeURIComponent('[AstraForge] 反馈')}`
-                + `&body=${encodeURIComponent(fmtDiag(diag))}`,
-              ).catch((e) => showToast(e.message))}>邮件</Btn>
-              <Btn icon={GitBranch} onClick={() => api.openUrl(`${GH}/issues/new/choose`)
-                .catch((e) => showToast(e.message))}>GitHub Issue</Btn>
+              <CopyBtn text={() => fmtDiag(diag)} label="复制诊断" showToast={showToast} />
+              <Btn icon={Mail} onClick={() => setMailOpen(true)}>邮箱</Btn>
+              <Btn icon={GitBranch} onClick={async () => {
+                try {
+                  const r = await api.openUrl(`${GH}/issues/new/choose`)
+                  if (r && r.ok === false) throw new Error(r.error || '无法打开浏览器')
+                  showToast('已在浏览器打开 GitHub Issue 页面', 4000)
+                } catch (e) {
+                  showToast(`✗ ${e.message || e}`, 4500)
+                }
+              }}>GitHub Issue</Btn>
             </div>
             <div className="af-hint">诊断只包含版本、系统、设备状态、模块版本与最近日志；不含序列号。提交前可在预览里检查并删改。</div>
           </Section>
@@ -434,6 +550,10 @@ export default function AboutPage({ app }) {
           </div>
         </Section>
       </div>
+
+      {mailOpen ? (
+        <MailDialog diag={diag} showToast={showToast} onClose={() => setMailOpen(false)} />
+      ) : null}
 
       {feedbackOpen ? (
         <Modal title="反馈问题" onClose={() => setFeedbackOpen(false)} width={580}>

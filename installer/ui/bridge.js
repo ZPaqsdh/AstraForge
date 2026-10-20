@@ -306,7 +306,8 @@
   function installOpts() {
     var g = function (id, dflt) { var el = $(id); return el ? el.checked : dflt; };
     return JSON.stringify({ dir: S.dir, desktop: g('optDesk', true), startmenu: g('optStart', true),
-      autostart: g('optAuto', false), version: (BOOT && BOOT.version) || '0.0.0',
+      autostart: g('optAuto', false), drivers: g('optDrv', true),
+      version: (BOOT && BOOT.version) || '0.0.0',
       use_update: !!S.useUpdate,
       payload_url: S.update ? S.update.payload_url : '',
       payload_sha256: S.update ? S.update.payload_sha256 : '',

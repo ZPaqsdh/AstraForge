@@ -27,7 +27,7 @@ ROOT = Path(__file__).resolve().parent
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-APP_VERSION = "0.3.3"
+APP_VERSION = "0.3.4"
 
 # 应用级更新源（与 installer/setup_core.py 的 DEFAULT_UPDATE_URL 保持一致；
 # 测试可用 AF_UPDATE_URL 覆盖）。update.json 由 Release 的 latest/download 恒定入口提供。
@@ -537,6 +537,123 @@ def _shutdown_and_exit(bridge, label="窗口已关闭"):
 
 
 # ================= 桥接：API → 真模块 =================
+class _UpdateWatcher:
+    """后台更新检测：启动 4s 后首检 → 每 12h 一次（老大 2026-10-20 口径）。
+
+    语义要点（照老大原话实现）：
+    - **打开客户端就检测**：进程起来 4s（等首屏渲染完）后立刻查一次；
+    - **每 12 小时一次**：之后按单调时钟每 43200s 一次，避免休眠导致漂移；
+    - **关闭后重置**：状态**不落盘**，进程退出即丢；下次启动重新计时并立即检测。
+    失败静默（只记状态），连续 ≥3 次才让 UI 显示"检查失败"。
+    """
+
+    FIRST_DELAY = 4.0
+    INTERVAL = 12 * 3600.0
+    FAILS_TO_SHOW = 3
+
+    def __init__(self, bridge=None, first_delay=None, interval=None):
+        self._bridge = bridge
+        self.first_delay = self.FIRST_DELAY if first_delay is None else float(first_delay)
+        self.interval = self.INTERVAL if interval is None else float(interval)
+        self._lock = threading.Lock()
+        self._stop = threading.Event()
+        self._thread = None
+        self._state = {
+            "current": APP_VERSION, "latest": "", "has_update": False,
+            "checked_at": "", "next_check_at": "", "error": None, "fails": 0,
+            "mode": "installed" if (ROOT.parent / "AstraForge.exe").exists() else "dev",
+            "notes_url": "", "payload_url": "", "payload_sha256": "",
+            "can_apply": (ROOT.parent / "AstraForge.exe").exists(),
+            "first_delay": self.first_delay, "interval": self.interval,
+        }
+
+    # ---- 生命周期 ----
+    def start(self):
+        if os.environ.get("AF_NO_UPDATE_WATCH", "").strip().lower() in ("1", "true", "yes", "on"):
+            return False
+        if self._thread and self._thread.is_alive():
+            return True
+        self._thread = threading.Thread(target=self._loop, daemon=True, name="update-watch")
+        self._thread.start()
+        return True
+
+    def stop(self):
+        self._stop.set()
+
+    def _loop(self):
+        if self._stop.wait(self.first_delay):
+            return
+        while not self._stop.is_set():
+            self.check_now()
+            with self._lock:
+                self._state["next_check_at"] = time.strftime(
+                    "%Y-%m-%d %H:%M:%S", time.localtime(time.time() + self.interval))
+            if self._sleep(self.interval):
+                return
+
+    def _sleep(self, seconds: float) -> bool:
+        """按单调时钟睡满 seconds（分片，便于 stop 与避免休眠漂移）。"""
+        deadline = time.monotonic() + max(0.0, float(seconds))
+        while not self._stop.is_set():
+            left = deadline - time.monotonic()
+            if left <= 0:
+                return False
+            if self._stop.wait(min(left, 60.0)):
+                return True
+        return True
+
+    # ---- 状态 ----
+    def snapshot(self) -> dict:
+        with self._lock:
+            return dict(self._state)
+
+    def absorb(self, result: dict):
+        """把「手动检查」的结果并入自动检测状态（避免两套数字打架）。"""
+        if not isinstance(result, dict) or not result.get("ok"):
+            return
+        with self._lock:
+            self._state.update(
+                current=str(result.get("current") or APP_VERSION),
+                latest=str(result.get("latest") or ""),
+                has_update=bool(result.get("has_update")),
+                checked_at=time.strftime("%Y-%m-%d %H:%M:%S"),
+                error=None, fails=0,
+                notes_url=str(result.get("notes_url") or ""),
+                payload_url=str(result.get("payload_url") or ""),
+                payload_sha256=str(result.get("payload_sha256") or ""),
+                can_apply=bool(result.get("can_apply")),
+                mode=str(result.get("mode") or self._state.get("mode") or "dev"),
+            )
+
+    def check_now(self) -> dict:
+        """立即检测一次（后台线程与手动接口共用）。返回最新状态。"""
+        bridge = self._bridge
+        data, err = (None, "更新器未初始化")
+        try:
+            if bridge is not None:
+                data, err = bridge._fetch_update_manifest()
+        except Exception as e:  # noqa: BLE001
+            data, err = None, f"{type(e).__name__}: {str(e)[:80]}"
+        with self._lock:
+            if data is None:
+                self._state["fails"] = int(self._state.get("fails") or 0) + 1
+                self._state["error"] = str(err or "检查失败")
+                self._state["checked_at"] = time.strftime("%Y-%m-%d %H:%M:%S")
+                return dict(self._state)
+            latest = str(data.get("latest") or "")
+            self._state.update(
+                current=APP_VERSION,
+                latest=latest,
+                has_update=_ver_gt(latest, APP_VERSION),
+                checked_at=time.strftime("%Y-%m-%d %H:%M:%S"),
+                error=None, fails=0,
+                notes_url=str(data.get("notes_url") or ""),
+                payload_url=str(data.get("payload_url") or ""),
+                payload_sha256=str(data.get("payload_sha256") or ""),
+            )
+            return dict(self._state)
+
+
 class Bridge:
     """JS ↔ Python 桥接。前端 fetch('/api/xxx') 或 window.pywebview.api.xxx()。"""
 
@@ -551,6 +668,9 @@ class Bridge:
         self._upd = {"phase": "idle", "pct": 0, "msg": "", "path": "",
                      "latest": "", "error": None}
         self._scan_cache = (0.0, None)
+        # 自动更新检测（启动即检 + 每 12h；不落盘 → 关闭重置）
+        self._upd_watch = _UpdateWatcher(self)
+        self._upd_watch.start()
 
     # ---- 模块快捷取用 ----
     def _m(self, name):
@@ -1285,16 +1405,17 @@ class Bridge:
             return {"ok": False, "error": str(e)[:100]}
 
     def api_paths(self, **kw):
-        """安装布局与可打开的真实路径（关于页 / 设置页使用）。"""
+        """安装布局与可打开的真实路径（关于页 / 设置页使用）。
+
+        驱动工具路径统一走 `core.driverpack`（BUG-024）：随包布局是
+        `驱动工具/zadig/zadig.exe`，旧代码少一层 `zadig/` 导致永远找不到。
+        """
         rec = self._m("recorder")
         install_root = ROOT.parent
-        driver_tool = ""
-        for cand in (install_root / "驱动工具" / "zadig.exe",
-                     ROOT / "installer" / "driver" / "zadig.exe",
-                     ROOT / "installer" / "driver" / "pack" / "zadig" / "zadig.exe"):
-            if cand.exists():
-                driver_tool = str(cand)
-                break
+        from core import driverpack
+        drv = driverpack.summary()
+        driver_tool = drv["zadig"]
+        driver_pack = drv["pack_dir"]
         uninstaller = ""
         for cand in (install_root / "AstraForge-卸载.exe",
                      install_root / "_setup" / "AstraForge-卸载.exe"):
@@ -1306,9 +1427,77 @@ class Bridge:
                 "export": str(rec._out_dir()) if rec else str(ROOT.parent / "扫描输出"),
                 "data": str(ROOT / "data"),
                 "driver_tool": driver_tool,
+                "driver_pack": driver_pack,
+                "driver_pack_ok": bool(driver_pack),
+                "driver_zadig_ok": bool(driver_tool),
                 "uninstaller": uninstaller,
                 "log": str(ROOT / "shell_web.log"),
                 "python": sys.version.split()[0]}
+
+    # ---------- 驱动库（随包 驱动工具/，程序内可修复/安装/支持新设备） ----------
+    def api_driver_state(self, deep=0, **kw):
+        """设备 + 驱动判定 + 驱动库可用性。deep=1 强制重新枚举（绕过 3s 缓存）。"""
+        from core import driverpack
+        scan = self.api_device_scan(deep=deep)
+        depth = (scan or {}).get("depth") or {}
+        vid = "2BC5"
+        pid = str(depth.get("pid") or "")
+        entry = driverpack.match_device(vid, pid) if pid else None
+        return {
+            "scan": scan,
+            "depth": depth,
+            "driver_pack": driverpack.summary(),
+            "matched": ({
+                "id": entry.get("id"), "name": entry.get("name"),
+                "method": entry.get("method"),
+            } if entry else None),
+            "can_install": bool(entry) and driverpack.pack_dir() is not None,
+            "admin": driverpack.is_admin(),
+        }
+
+    def api_driver_manifest(self, **kw):
+        """驱动库清单（支持的机型 / 安装方式 / Zadig 是否就绪）。"""
+        from core import driverpack
+        return driverpack.summary()
+
+    def api_driver_install(self, driver_id="", **kw):
+        """安装/修复驱动（应用内）。不传 driver_id 时按当前设备 VID/PID 自动匹配。"""
+        from core import driverpack
+        if not driver_id:
+            scan = self.api_device_scan(deep=1)
+            depth = (scan or {}).get("depth") or {}
+            entry = driverpack.match_device("2BC5", str(depth.get("pid") or ""))
+            if not entry:
+                return {"ok": False,
+                        "error": "没有匹配到驱动条目（先插好相机并点「重新检测」）"}
+            driver_id = str(entry.get("id"))
+        return driverpack.install_driver(driver_id)
+
+    def api_driver_open_tool(self, **kw):
+        """拉起随包 Zadig（路径来自 manifest.tools.zadig，修 BUG-024）。"""
+        from core import driverpack
+        p = driverpack.zadig_path()
+        if not p:
+            return {"ok": False,
+                    "error": "未找到驱动工具（应位于 驱动工具/zadig/zadig.exe）",
+                    "hint": "驱动库缺失时请重新运行安装器覆盖安装"}
+        try:
+            os.startfile(p)      # noqa: S606
+            return {"ok": True, "path": p}
+        except Exception as e:  # noqa: BLE001
+            return {"ok": False, "error": str(e)[:120]}
+
+    def api_driver_open_folder(self, **kw):
+        """打开驱动库目录（手动排查/换 INF 用）。"""
+        from core import driverpack
+        d = driverpack.pack_dir()
+        if not d:
+            return {"ok": False, "error": "驱动库目录不存在"}
+        try:
+            os.startfile(str(d))   # noqa: S606
+            return {"ok": True, "path": str(d)}
+        except Exception as e:  # noqa: BLE001
+            return {"ok": False, "error": str(e)[:120]}
 
     def api_artifact(self, path="", **kw):
         """读取导出目录内的产物图片（融合预览），只允许 png/jpg，防路径穿越。"""
@@ -1398,14 +1587,32 @@ class Bridge:
             return {"ok": False, "error": err, "current": APP_VERSION}
         latest = str(data.get("latest"))
         can_apply = (ROOT.parent / "AstraForge.exe").exists()
-        return {"ok": True, "current": APP_VERSION, "latest": latest,
-                "has_update": _ver_gt(latest, APP_VERSION),
-                "payload_url": str(data.get("payload_url") or ""),
-                "payload_sha256": str(data.get("payload_sha256") or ""),
-                "notes_url": str(data.get("notes_url") or ""),
-                "min_installer": str(data.get("min_installer") or ""),
-                "can_apply": can_apply,
-                "mode": "installed" if can_apply else "dev"}
+        result = {"ok": True, "current": APP_VERSION, "latest": latest,
+                  "has_update": _ver_gt(latest, APP_VERSION),
+                  "payload_url": str(data.get("payload_url") or ""),
+                  "payload_sha256": str(data.get("payload_sha256") or ""),
+                  "notes_url": str(data.get("notes_url") or ""),
+                  "min_installer": str(data.get("min_installer") or ""),
+                  "can_apply": can_apply,
+                  "mode": "installed" if can_apply else "dev"}
+        try:
+            self._upd_watch.absorb(result)     # 与自动检测共用一份状态
+        except Exception:
+            pass
+        return result
+
+    def api_update_state(self, **kw):
+        """自动更新状态（前端轮询：侧栏红点 / 顶部横幅 / 关于页）。"""
+        st = self._upd_watch.snapshot()
+        # 失败未达阈值时对 UI 隐藏错误（静默），达到才暴露
+        if st.get("error") and int(st.get("fails") or 0) < _UpdateWatcher.FAILS_TO_SHOW:
+            st["error"] = None
+            st["error_hidden"] = True
+        return st
+
+    def api_update_check_now(self, **kw):
+        """手动触发一次自动检测器刷新（含计时重置）。"""
+        return self._upd_watch.check_now()
 
     def api_update_download(self, url="", sha256="", latest="", **kw):
         """后台下载更新包（.part → SHA-256 → 改名）；进度用 /api/update_status 轮询。"""

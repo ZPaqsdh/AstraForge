@@ -7,7 +7,7 @@ export const NAV = [
   { id: 'about', label: '关于与更新', hint: '版本 · 驱动 · 反馈', icon: Info },
 ]
 
-export default function Sidebar({ active, onChange }) {
+export default function Sidebar({ active, onChange, hasUpdate = false }) {
   return (
     <aside className="af-side">
       <div className="af-brand">
@@ -26,6 +26,7 @@ export default function Sidebar({ active, onChange }) {
               <b>{label}</b>
               <small>{hint}</small>
             </span>
+            {id === 'about' && hasUpdate ? <span className="af-nav-badge" title="有新版本" /> : null}
             {active === id ? <ChevronRight size={13} className="af-nav-arrow" /> : null}
           </button>
         ))}

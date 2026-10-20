@@ -7,9 +7,9 @@
 
 | 文件 | 说明 | 体积（实测） |
 |---|---|---:|
-| `AstraForge-Setup-Online-v0.3.3.exe` | **在线下载器**（主推）：安装时从上游拉最新载荷 | 259 MB |
-| `AstraForge-Setup-Offline-v0.3.3.exe` | **离线完整包**：自带 0.3.3 全部载荷 | 600 MB |
-| `AstraForge-0.3.3-payload.zip` | 在线安装用的载荷资产（上传 Release，用户无需手动下载） | 344 MB |
+| `AstraForge-Setup-Online-v0.3.4.exe` | **在线下载器**（主推）：安装时从上游拉最新载荷 | 259 MB |
+| `AstraForge-Setup-Offline-v0.3.4.exe` | **离线完整包**：自带 0.3.4 全部载荷 | 600 MB |
+| `AstraForge-0.3.4-payload.zip` | 在线安装用的载荷资产（上传 Release，用户无需手动下载） | 344 MB |
 | `update.json` | 版本清单模板（填仓库 URL / SHA256 后上传） | <1 KB |
 
 两个安装器都是 **PyInstaller onefile**：运行时、HTML UI、驱动库全在 exe 内，
@@ -70,11 +70,11 @@ DEFAULT_UPDATE_URL = 'https://github.com/ZPaqsdh/AstraForge/releases/latest/down
 ```json
 {
   "app": "AstraForge",
-  "latest": "0.3.3",
-  "min_installer": "0.3.3",
-  "payload_url": "https://github.com/ZPaqsdh/AstraForge/releases/download/v0.3.3/AstraForge-0.3.3-payload.zip",
+  "latest": "0.3.4",
+  "min_installer": "0.3.4",
+  "payload_url": "https://github.com/ZPaqsdh/AstraForge/releases/download/v0.3.4/AstraForge-0.3.4-payload.zip",
   "payload_sha256": "…",
-  "notes_url": "https://github.com/ZPaqsdh/AstraForge/releases/tag/v0.3.3"
+  "notes_url": "https://github.com/ZPaqsdh/AstraForge/releases/tag/v0.3.4"
 }
 ```
 
@@ -93,9 +93,9 @@ DEFAULT_UPDATE_URL = 'https://github.com/ZPaqsdh/AstraForge/releases/latest/down
 
 ```bat
 python installer/build_ui.py                 :: 生成 ui/installer.html
-python installer/build_release.py 0.3.3     :: 打 Online + Offline + 卸载器 + payload
-python installer/build_release.py 0.3.3 --only online     :: 只打在线版（调试用）
-python installer/build_release.py 0.3.3 --only offline    :: 只打离线版
+python installer/build_release.py 0.3.4     :: 打 Online + Offline + 卸载器 + payload
+python installer/build_release.py 0.3.4 --only online     :: 只打在线版（调试用）
+python installer/build_release.py 0.3.4 --only offline    :: 只打离线版
 ```
 
 构建时间约 7 分钟（两版 + 载荷）；输出到 `发行/安装器/AstraForge-Setup-v<版本>[-时间戳]/`。
@@ -104,7 +104,7 @@ python installer/build_release.py 0.3.3 --only offline    :: 只打离线版
 打包成功会自动删除；失败时保留便于排查；要主动保留加 `--keep-work`：
 
 ```bat
-python installer/build_release.py 0.3.3 --keep-work
+python installer/build_release.py 0.3.4 --keep-work
 ```
 
 只有 `AstraForge-Setup-v<版本>/` 是交付产物，`_build-*` 可随时删。
