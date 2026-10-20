@@ -27,7 +27,7 @@ ROOT = Path(__file__).resolve().parent
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-APP_VERSION = "0.3.5"
+APP_VERSION = "0.3.6"
 
 # 应用级更新源（与 installer/setup_core.py 的 DEFAULT_UPDATE_URL 保持一致；
 # 测试可用 AF_UPDATE_URL 覆盖）。update.json 由 Release 的 latest/download 恒定入口提供。
@@ -1608,6 +1608,26 @@ class Bridge:
         try:
             os.startfile(str(d))   # noqa: S606
             return {"ok": True, "path": str(d)}
+        except Exception as e:  # noqa: BLE001
+            return {"ok": False, "error": str(e)[:120]}
+
+    def api_driver_uninstall(self, oem="", **kw):
+        """卸载已发布的驱动包（pnputil /delete-driver）。不传 oem 自动找 Orbbec/Astra。"""
+        from core import driverpack
+        return driverpack.uninstall_driver(oem or "")
+
+    def api_launch_exe(self, path="", **kw):
+        """启动 exe（卸载器等）。比 open_dir 语义更明确，不接受目录。"""
+        p = (path or "").strip()
+        if not p:
+            return {"ok": False, "error": "空路径"}
+        if not p.lower().endswith(".exe"):
+            return {"ok": False, "error": "仅允许 .exe 文件"}
+        if not os.path.isfile(p):
+            return {"ok": False, "error": f"文件不存在：{p}"}
+        try:
+            os.startfile(p)  # noqa: S606
+            return {"ok": True, "launched": p}
         except Exception as e:  # noqa: BLE001
             return {"ok": False, "error": str(e)[:120]}
 

@@ -74,6 +74,7 @@ export const api = {
   setPerfMode: (mode) => req('/api/set_perf_mode', 'POST', { mode }),
   setDispRange: (lo, hi) => req('/api/set_disp_range', 'POST', { lo, hi }),
   openDir: (path) => req('/api/open_dir', 'POST', { path }),
+  launchExe: (path) => req('/api/launch_exe', 'POST', { path }),
   openUrl: (url) => req('/api/open_url', 'POST', { url }),
   paths: () => req('/api/paths'),
   artifactUrl: (path) => `/api/artifact?path=${encodeURIComponent(path)}&t=${Date.now()}`,
@@ -98,6 +99,7 @@ export const api = {
   driverInstall: (driverId = '') => req('/api/driver_install', 'POST', { driver_id: driverId }),
   driverOpenTool: () => req('/api/driver_open_tool', 'POST', {}),
   driverOpenFolder: () => req('/api/driver_open_folder', 'POST', {}),
+  driverUninstall: (oem = '') => req('/api/driver_uninstall', 'POST', { oem }),
 
   // 收尾
   shutdown: () => req('/api/shutdown', 'POST', {}),

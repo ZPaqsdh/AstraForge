@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import {
-  RefreshCw, Download, Check, AlertTriangle, FolderOpen, Usb, Trash2,
+  RefreshCw, Download, Check, X, AlertTriangle, FolderOpen, Usb, Trash2,
   Copy, Mail, GitBranch, Bug, ExternalLink, Package, ShieldCheck,
   Send, Cpu, HardDrive, Wrench,
 } from 'lucide-react'
@@ -10,6 +10,7 @@ import { api } from '../api.js'
 const MAIL = '1544648188z@gmail.com'
 
 const UPDATE_LOG = [
+  { version: 'v0.3.6', date: '2026-10-20', note: '复制按钮变绿+居中胶囊双反馈；卸载按钮常亮可用' },
   { version: 'v0.3.5', date: '2026-10-20', note: '驱动按钮不再哑灰（原因可见）、USB 复位、插拔重新识别、复制/邮箱反馈' },
   { version: 'v0.3.4', date: '2026-10-20', note: '驱动随包一体可自修、反馈交互重做、更新自动检测' },
   { version: 'v0.3.3', date: '2026-10-20', note: '导出模型左右边缘颗粒清理、预览竖线修复' },
@@ -65,45 +66,61 @@ function friendlyUpdateError(msg) {
   return t
 }
 
-/** 复制按钮：点了**就地**变「已复制 ✓」+ 旁边常驻一行结果（2s 后按钮复原，提示保留 6s）。
- *
- * BUG-025：老大反馈"点了没反馈"。原因有两层——① 只有 toast，容易被忽略/被窗口边缘裁掉；
- * ② 按钮变「已复制」后 2 秒复原，慢一点看就什么都没有。现在三重反馈：
- * 按钮文字变「已复制」+ 行内文字「已复制 N 字，可直接粘贴」+ toast，且**可以反复点**。
+/** 复制按钮（GitHub 风 + 居中胶囊）：
+ * - 按钮态：图标→对勾、变实心绿、文字→「已复制」（3.5s 复原）
+ * - 胶囊：屏幕正中弹出绿色大圆胶囊「✓ 已复制」（2s 消失），不可能看不见
+ * - 行内 + toast 兜底。可反复点。
  */
 function CopyBtn({ text, label, icon = Copy, showToast, small = true, primary = false }) {
   const [done, setDone] = useState(false)
   const [msg, setMsg] = useState('')
+  const [cap, setCap] = useState('')      // 居中胶囊文字；空=不显示
   const timer = useRef(null)
   const msgTimer = useRef(null)
+  const capTimer = useRef(null)
   const go = async () => {
     const payload = typeof text === 'function' ? text() : text
     const ok = await copyText(payload)
     clearTimeout(timer.current)
     clearTimeout(msgTimer.current)
+    clearTimeout(capTimer.current)
     if (!ok) {
       setDone(false)
       setMsg('✗ 复制失败：剪贴板不可用，请手动选中文字复制')
+      setCap('✗ 复制失败')
       showToast('✗ 复制失败：剪贴板不可用', 5000)
+      capTimer.current = setTimeout(() => setCap(''), 2200)
       msgTimer.current = setTimeout(() => setMsg(''), 8000)
       return
     }
     const n = String(payload == null ? '' : payload).length
     setDone(true)
     setMsg(`✓ 已复制 ${n} 字，可直接粘贴`)
-    timer.current = setTimeout(() => setDone(false), 2000)
-    msgTimer.current = setTimeout(() => setMsg(''), 6000)
+    setCap(`✓ 已复制 ${n} 字`)
+    timer.current = setTimeout(() => setDone(false), 3500)
+    capTimer.current = setTimeout(() => setCap(''), 2000)
+    msgTimer.current = setTimeout(() => setMsg(''), 7000)
     showToast('✓ 已复制到剪贴板')
   }
-  useEffect(() => () => { clearTimeout(timer.current); clearTimeout(msgTimer.current) }, [])
+  useEffect(() => () => {
+    clearTimeout(timer.current); clearTimeout(msgTimer.current); clearTimeout(capTimer.current)
+  }, [])
   return (
-    <span className="af-copy-wrap">
-      <Btn small={small} primary={primary} icon={done ? Check : icon}
-        className={done ? 'ok' : ''} onClick={go}>
-        {done ? '已复制' : label}
-      </Btn>
-      {msg ? <span className={msg.startsWith('✓') ? 'af-copy-ok' : 'af-copy-bad'}>{msg}</span> : null}
-    </span>
+    <>
+      <span className="af-copy-wrap">
+        <Btn small={small} primary={primary && !done} icon={done ? Check : icon}
+          className={done ? 'ok' : ''} onClick={go}>
+          {done ? '已复制 ✓' : label}
+        </Btn>
+        {msg ? <span className={msg.startsWith('✓') ? 'af-copy-ok' : 'af-copy-bad'}>{msg}</span> : null}
+      </span>
+      {cap ? (
+        <div className={`af-capsule${cap.startsWith('✗') ? ' bad' : ''}`}>
+          {cap.startsWith('✓') ? <Check size={22} strokeWidth={3} /> : <X size={20} />}
+          {cap}
+        </div>
+      ) : null}
+    </>
   )
 }
 
@@ -314,6 +331,8 @@ export default function AboutPage({ app }) {
   const [diag, setDiag] = useState(null)
   const [feedbackOpen, setFeedbackOpen] = useState(false)
   const [mailOpen, setMailOpen] = useState(false)
+  const [uninstallHelp, setUninstallHelp] = useState(false)
+  const [uninstallDrvConfirm, setUninstallDrvConfirm] = useState(false)
   const [fb, setFb] = useState({ type: 'Bug', title: '', body: '', withDiag: true })
 
   const load = async () => {
@@ -377,6 +396,25 @@ export default function AboutPage({ app }) {
     } catch (e) {
       setDrvMsg(`复位失败：${e.message || e}`)
       showToast(`✗ 复位失败：${e.message || e}`, 7000)
+    } finally {
+      setInstalling(false)
+    }
+  }
+
+  const uninstallDriver = async () => {
+    setInstalling(true)
+    setDrvMsg('正在卸载驱动…')
+    setUninstallDrvConfirm(false)
+    try {
+      const r = await api.driverUninstall()
+      setDrvMsg((r.output || r.msg || '').slice(0, 120))
+      showToast(r.ok
+        ? `✓ ${r.msg || '驱动已卸载'}（UAC 确认后请点「重新检测」）`
+        : `✗ ${r.error || '驱动卸载失败'}`, 8000)
+      await refreshDriver(true)
+    } catch (e) {
+      setDrvMsg(`驱动卸载失败：${e.message || e}`)
+      showToast(`✗ 驱动卸载失败：${e.message || e}`, 7000)
     } finally {
       setInstalling(false)
     }
@@ -551,12 +589,28 @@ export default function AboutPage({ app }) {
                 onClick={() => guard(blockers.pack, openDriverFolder)}>
                 驱动文件夹
               </Btn>
+              <Btn small danger icon={Trash2} disabled={installing}
+                onClick={() => setUninstallDrvConfirm(true)}>
+                卸载驱动
+              </Btn>
               <Btn small icon={Cpu} onClick={() => guard(blockers.device, resetUsb)}>
                 USB 复位
               </Btn>
               <Btn small icon={FolderOpen} onClick={() => openExe(paths?.root, '程序目录')}>程序目录</Btn>
-              <Btn small danger icon={Trash2} disabled={!paths?.uninstaller}
-                onClick={() => openExe(paths?.uninstaller, '卸载器')}>
+              <Btn small danger icon={Trash2}
+                onClick={async () => {
+                  if (paths?.uninstaller) {
+                    try {
+                      const r = await api.launchExe(paths.uninstaller)
+                      if (r && r.ok === false) throw new Error(r.error)
+                      showToast('已启动卸载器，请按向导操作')
+                    } catch (e) {
+                      showToast(`✗ ${e.message || e}`)
+                    }
+                  } else {
+                    setUninstallHelp(true)
+                  }
+                }}>
                 卸载
               </Btn>
             </div>
@@ -631,6 +685,55 @@ export default function AboutPage({ app }) {
 
       {mailOpen ? (
         <MailDialog diag={diag} showToast={showToast} onClose={() => setMailOpen(false)} />
+      ) : null}
+
+      {uninstallHelp ? (
+        <Modal title="卸载 AstraForge" onClose={() => setUninstallHelp(false)} width={520}>
+          <p className="af-section-copy">
+            {paths?.installed === false
+              ? '当前是便携版（免安装），没有卸载器。'
+              : '未找到卸载器程序（可能已被删除或在非标准目录）。'}
+          </p>
+          <div className="af-block-item" style={{ marginBottom: 12 }}>
+            <b>便携版卸载方法</b>：直接删除软件文件夹即可。<br />
+            路径：<code style={{ userSelect: 'all' }}>{paths?.root || '（未知）'}</code>
+          </div>
+          <div className="af-block-item" style={{ marginBottom: 12 }}>
+            <b>已安装版</b>：请用 Windows「设置 → 应用」里搜 AstraForge 卸载，
+            或在安装目录找 <code>AstraForge-卸载.exe</code>。
+          </div>
+          <div className="af-hint">
+            数据目录（设置 / 标定 / 扫描输出）不会被自动删除：
+            <code style={{ userSelect: 'all' }}>{paths?.data || ''}</code>
+            ；导出目录：<code style={{ userSelect: 'all' }}>{paths?.export || ''}</code>
+          </div>
+          <div className="af-modal-actions">
+            <Btn icon={FolderOpen} onClick={() => openExe(paths?.root, '软件目录')}>打开软件目录</Btn>
+            <Btn primary onClick={() => setUninstallHelp(false)}>知道了</Btn>
+          </div>
+        </Modal>
+      ) : null}
+
+      {uninstallDrvConfirm ? (
+        <Modal title="卸载 Astra 驱动" onClose={() => setUninstallDrvConfirm(false)} width={480}>
+          <p className="af-section-copy">
+            将从系统中移除 Orbbec/Astra 深度相机的驱动包（WinUSB / 厂商 INF）。
+          </p>
+          <div className="af-block-item" style={{ marginBottom: 10 }}>
+            <b>⚠ 后果</b>：卸载后深度设备将无法识别，需重新点「安装驱动」或运行安装器才能恢复。
+            彩色 UVC 摄像头不受影响。
+          </div>
+          <div className="af-hint">
+            操作需要管理员权限，系统会弹 UAC 提权窗口。
+          </div>
+          <div className="af-modal-actions">
+            <Btn onClick={() => setUninstallDrvConfirm(false)}>取消</Btn>
+            <Btn danger icon={Trash2} disabled={installing}
+              onClick={uninstallDriver}>
+              {installing ? '卸载中…' : '确认卸载驱动'}
+            </Btn>
+          </div>
+        </Modal>
       ) : null}
 
       {feedbackOpen ? (

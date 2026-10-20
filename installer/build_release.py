@@ -33,7 +33,7 @@ INST = SRC / 'installer'
 RELEASE_APP = WS / '发行' / 'AstraForge'
 OUT_ROOT = WS / '发行' / '安装器'
 _args = sys.argv[1:]
-VERSION = _args[0] if (_args and not _args[0].startswith('--')) else '0.3.5'
+VERSION = _args[0] if (_args and not _args[0].startswith('--')) else '0.3.6'
 ONLY = _args[_args.index('--only') + 1] if '--only' in _args else ''
 TS = time.strftime('%Y%m%d-%H%M%S')
 
@@ -108,6 +108,13 @@ def stage_payload(uninst_exe: Path) -> Path:
     # 轻量卸载器
     shutil.copy2(uninst_exe, stage / 'AstraForge-卸载.exe')
     print(f'   + AstraForge-卸载.exe（{uninst_exe.stat().st_size/1024/1024:.1f} MB）')
+    # 同步到便携版目录（关于页「卸载」按钮要能找到它）
+    try:
+        ship_uninst = WS / '发行' / 'AstraForge' / 'AstraForge-卸载.exe'
+        shutil.copy2(uninst_exe, ship_uninst)
+        print(f'   + 已同步卸载器到便携版 {ship_uninst.name}')
+    except Exception as e:
+        print(f'   ! 便携版卸载器同步失败：{e}')
 
     lic = INST / '许可与免责声明.txt'
     if lic.exists():

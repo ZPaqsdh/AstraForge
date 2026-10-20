@@ -223,3 +223,105 @@ def summary() -> dict:
         "zadig": zp,
         "zadig_ok": bool(zp),
     }
+
+
+# ---------------------------------------------------------------------------
+# 驱动卸载（v0.3.6 新增）
+# ---------------------------------------------------------------------------
+def list_oem_drivers(keyword="orbbec"):
+    """列出已发布驱动包（oem*.inf），按关键字过滤（默认 Orbbec / Astra）。
+
+    返回 [{oem_name, class, provider, version, original_name}]
+    """
+    try:
+        r = subprocess.run(["pnputil", "/enum-drivers"],
+                           capture_output=True, timeout=30,
+                           creationflags=0x08000000)
+        txt = (r.stdout or b"").decode("gbk", errors="replace")
+    except Exception as e:  # noqa: BLE001
+        return {"ok": False, "error": f"pnputil 枚举失败：{e}"}
+
+    items = []
+    cur = {}
+    for line in txt.splitlines():
+        s = line.strip()
+        if s.startswith("已发布名称") or s.lower().startswith("published name"):
+            if cur.get("oem_name"):
+                items.append(cur)
+            cur = {"oem_name": s.split(":", 1)[-1].strip()}
+        elif s.startswith("原始名称") or s.lower().startswith("original name"):
+            cur["original_name"] = s.split(":", 1)[-1].strip()
+        elif s.startswith("提供商名称") or s.lower().startswith("provider name"):
+            cur["provider"] = s.split(":", 1)[-1].strip()
+        elif s.startswith("类名称") or s.lower().startswith("class name"):
+            cur["class"] = s.split(":", 1)[-1].strip()
+        elif s.startswith("驱动程序版本") or s.lower().startswith("driver version"):
+            cur["version"] = s.split(":", 1)[-1].strip()
+    if cur.get("oem_name"):
+        items.append(cur)
+
+    kw = (keyword or "").lower()
+    if kw:
+        filtered = [x for x in items
+                    if kw in (x.get("provider") or "").lower()
+                    or kw in (x.get("original_name") or "").lower()
+                    or kw in (x.get("oem_name") or "").lower()
+                    or "astra" in (x.get("original_name") or "").lower()]
+    else:
+        filtered = items
+    return {"ok": True, "drivers": filtered, "total": len(items)}
+
+
+def uninstall_driver(oem_name=""):
+    """卸载已发布的驱动包。不传 oem_name 则自动找 Orbbec/Astra 的第一条。
+
+    - 非管理员自动提权（Start-Process -Verb RunAs）
+    - /uninstall 移除设备绑定；/force 强制删除包
+    """
+    if not oem_name:
+        lst = list_oem_drivers("orbbec")
+        if not lst.get("ok"):
+            return lst
+        drivers = lst.get("drivers") or []
+        # 也按 astra 找一遍
+        if not drivers:
+            lst2 = list_oem_drivers("astra")
+            drivers = (lst2.get("drivers") or []) if lst2.get("ok") else []
+        if not drivers:
+            return {"ok": False,
+                    "error": "没有找到 Orbbec/Astra 驱动包（可能已卸载或未安装）"}
+        oem_name = drivers[0]["oem_name"]
+    if not oem_name.lower().endswith(".inf"):
+        return {"ok": False, "error": f"无效的驱动包名：{oem_name}"}
+
+    args = f'/delete-driver', f'"{oem_name}"', '/uninstall', '/force'
+    if is_admin():
+        try:
+            r = subprocess.run(["pnputil", "/delete-driver", oem_name,
+                                "/uninstall", "/force"],
+                               capture_output=True, timeout=60,
+                               creationflags=0x08000000)
+            out = (r.stdout or b"").decode("gbk", errors="replace")
+            ok = r.returncode == 0
+            return {"ok": ok, "oem": oem_name, "admin": True,
+                    "msg": f"驱动 {oem_name} 已卸载" if ok else "卸载失败",
+                    "output": out[-600:]}
+        except Exception as e:  # noqa: BLE001
+            return {"ok": False, "error": f"pnputil 调用失败：{e}"}
+    # 非管理员 → 提权
+    ps = ("Start-Process -FilePath pnputil.exe -ArgumentList "
+          f"'/delete-driver','\"{oem_name}\"','/uninstall','/force' "
+          "-Verb RunAs -Wait -WindowStyle Hidden")
+    try:
+        r = subprocess.run(["powershell", "-NoProfile", "-NonInteractive",
+                            "-Command", ps],
+                           capture_output=True, timeout=90,
+                           creationflags=0x08000000)
+        out = (r.stdout or b"").decode("gbk", errors="replace")
+        ok = r.returncode == 0
+        return {"ok": ok, "oem": oem_name, "elevated": True,
+                "msg": f"已请求管理员权限卸载 {oem_name}；确认 UAC 弹窗后点「重新检测」"
+                       if ok else "提权卸载失败",
+                "output": out[-400:]}
+    except Exception as e:  # noqa: BLE001
+        return {"ok": False, "error": f"提权失败：{e}"}
