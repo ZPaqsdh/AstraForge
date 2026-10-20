@@ -67,56 +67,89 @@ function friendlyUpdateError(msg) {
 }
 
 /** 复制按钮（GitHub 风 + 居中胶囊）：
- * - 按钮态：图标→对勾、变实心绿、文字→「已复制」（3.5s 复原）
- * - 胶囊：屏幕正中弹出绿色大圆胶囊「✓ 已复制」（2s 消失），不可能看不见
- * - 行内 + toast 兜底。可反复点。
+ * - 点击**立即**弹胶囊「正在复制…」——不等复制结果，保证任何情况下都有反馈
+ * - 复制成功→胶囊变「✓ 已复制 N 字」+ 按钮变实心绿「已复制 ✓」
+ * - 复制失败→胶囊变红色「✗ 复制失败」+ 行内提示手动复制
+ * - 全程 try/catch，任何异常都不会导致"点了没反应"
  */
 function CopyBtn({ text, label, icon = Copy, showToast, small = true, primary = false }) {
   const [done, setDone] = useState(false)
   const [msg, setMsg] = useState('')
   const [cap, setCap] = useState('')      // 居中胶囊文字；空=不显示
+  const [busy, setBusy] = useState(false)
   const timer = useRef(null)
   const msgTimer = useRef(null)
   const capTimer = useRef(null)
+
+  const showCap = (txt, ms) => {
+    clearTimeout(capTimer.current)
+    setCap(txt)
+    capTimer.current = setTimeout(() => setCap(''), ms)
+  }
+
   const go = async () => {
-    const payload = typeof text === 'function' ? text() : text
-    const ok = await copyText(payload)
+    // ① 立即给反馈——不等复制结果
     clearTimeout(timer.current)
     clearTimeout(msgTimer.current)
-    clearTimeout(capTimer.current)
-    if (!ok) {
-      setDone(false)
-      setMsg('✗ 复制失败：剪贴板不可用，请手动选中文字复制')
-      setCap('✗ 复制失败')
-      showToast('✗ 复制失败：剪贴板不可用', 5000)
-      capTimer.current = setTimeout(() => setCap(''), 2200)
-      msgTimer.current = setTimeout(() => setMsg(''), 8000)
+    setBusy(true)
+    showCap('⏳ 正在复制…', 10000)   // 兜底 10s 自动消失
+    setMsg('')
+
+    let payload = ''
+    try {
+      payload = typeof text === 'function' ? text() : text
+    } catch (e) {
+      setBusy(false)
+      showCap('✗ 内容生成失败', 3000)
+      setMsg(`✗ ${e.message || '内容生成失败'}`)
+      showToast('✗ 复制内容生成失败', 5000)
       return
     }
-    const n = String(payload == null ? '' : payload).length
-    setDone(true)
-    setMsg(`✓ 已复制 ${n} 字，可直接粘贴`)
-    setCap(`✓ 已复制 ${n} 字`)
-    timer.current = setTimeout(() => setDone(false), 3500)
-    capTimer.current = setTimeout(() => setCap(''), 2000)
-    msgTimer.current = setTimeout(() => setMsg(''), 7000)
-    showToast('✓ 已复制到剪贴板')
+
+    // ② 尝试复制
+    let ok = false
+    try {
+      ok = await copyText(payload)
+    } catch (e) {
+      ok = false
+    }
+    setBusy(false)
+
+    if (ok) {
+      const n = String(payload == null ? '' : payload).length
+      setDone(true)
+      setMsg(`✓ 已复制 ${n} 字，可直接粘贴`)
+      showCap(`✓ 已复制 ${n} 字`, 2200)
+      timer.current = setTimeout(() => setDone(false), 3500)
+      msgTimer.current = setTimeout(() => setMsg(''), 7000)
+      showToast('✓ 已复制到剪贴板')
+    } else {
+      setDone(false)
+      setMsg('✗ 复制失败，请手动选中文字 Ctrl+C')
+      showCap('✗ 复制失败', 3000)
+      showToast('✗ 剪贴板不可用，请手动选中复制', 5000)
+      msgTimer.current = setTimeout(() => setMsg(''), 8000)
+    }
   }
+
   useEffect(() => () => {
     clearTimeout(timer.current); clearTimeout(msgTimer.current); clearTimeout(capTimer.current)
   }, [])
+
   return (
     <>
       <span className="af-copy-wrap">
         <Btn small={small} primary={primary && !done} icon={done ? Check : icon}
-          className={done ? 'ok' : ''} onClick={go}>
-          {done ? '已复制 ✓' : label}
+          className={done ? 'ok' : ''} disabled={busy} onClick={go}>
+          {done ? '已复制 ✓' : busy ? '复制中…' : label}
         </Btn>
         {msg ? <span className={msg.startsWith('✓') ? 'af-copy-ok' : 'af-copy-bad'}>{msg}</span> : null}
       </span>
       {cap ? (
         <div className={`af-capsule${cap.startsWith('✗') ? ' bad' : ''}`}>
-          {cap.startsWith('✓') ? <Check size={22} strokeWidth={3} /> : <X size={20} />}
+          {cap.startsWith('✓') ? <Check size={22} strokeWidth={3} />
+            : cap.startsWith('⏳') ? <RefreshCw size={20} className="af-spin" />
+            : <X size={20} />}
           {cap}
         </div>
       ) : null}

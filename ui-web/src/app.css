@@ -540,6 +540,8 @@
   0% { opacity: 0; transform: translate(-50%, -50%) scale(.72); }
   100% { opacity: 1; transform: translate(-50%, -50%) scale(1); }
 }
+.af-spin { animation: af-rotate 1s linear infinite; }
+@keyframes af-rotate { 100% { transform: rotate(360deg); } }
 
 .af-state-panel { position: fixed; right: 12px; bottom: 12px; z-index: 1100; width: 278px; background: var(--panel); border: 1px solid var(--border-strong); border-radius: 11px; box-shadow: 0 12px 36px rgba(0,0,0,.24); overflow: hidden; }
 /* 复制类按钮的行内结果（BUG-025：不能只靠 toast；toast 消失后仍要能看到结果） */
