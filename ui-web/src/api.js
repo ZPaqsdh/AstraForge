@@ -74,7 +74,7 @@ export const api = {
   setPerfMode: (mode) => req('/api/set_perf_mode', 'POST', { mode }),
   setDispRange: (lo, hi) => req('/api/set_disp_range', 'POST', { lo, hi }),
   openDir: (path) => req('/api/open_dir', 'POST', { path }),
-  launchExe: (path) => req('/api/launch_exe', 'POST', { path }),
+  launchExe: (path, args = '') => req('/api/launch_exe', 'POST', { path, args }),
   openUrl: (url) => req('/api/open_url', 'POST', { url }),
   paths: () => req('/api/paths'),
   artifactUrl: (path) => `/api/artifact?path=${encodeURIComponent(path)}&t=${Date.now()}`,

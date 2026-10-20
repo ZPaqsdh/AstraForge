@@ -601,7 +601,10 @@ export default function AboutPage({ app }) {
                 onClick={async () => {
                   if (paths?.uninstaller) {
                     try {
-                      const r = await api.launchExe(paths.uninstaller)
+                      // 便携版无注册表 → 必须传 --dir，否则卸载器报「未找到安装目录」
+                      const dirArg = paths.install_root || paths.root || ''
+                      const r = await api.launchExe(paths.uninstaller,
+                        dirArg ? `--dir "${dirArg}"` : '')
                       if (r && r.ok === false) throw new Error(r.error)
                       showToast('已启动卸载器，请按向导操作')
                     } catch (e) {

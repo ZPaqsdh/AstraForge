@@ -1616,8 +1616,14 @@ class Bridge:
         from core import driverpack
         return driverpack.uninstall_driver(oem or "")
 
-    def api_launch_exe(self, path="", **kw):
-        """启动 exe（卸载器等）。比 open_dir 语义更明确，不接受目录。"""
+    def api_launch_exe(self, path="", args="", **kw):
+        """启动 exe（卸载器等）。args 为可选命令行参数（空格分隔）。
+
+        用 subprocess.Popen 而非 os.startfile——卸载器需要 `--dir <安装目录>` 参数
+        （便携版无注册表记录，不传目录会报「未找到安装目录」）。
+        """
+        import shlex
+        import subprocess as _sp
         p = (path or "").strip()
         if not p:
             return {"ok": False, "error": "空路径"}
@@ -1625,9 +1631,12 @@ class Bridge:
             return {"ok": False, "error": "仅允许 .exe 文件"}
         if not os.path.isfile(p):
             return {"ok": False, "error": f"文件不存在：{p}"}
+        cmd = [p]
+        if args:
+            cmd += shlex.split(args, posix=False)
         try:
-            os.startfile(p)  # noqa: S606
-            return {"ok": True, "launched": p}
+            _sp.Popen(cmd, cwd=os.path.dirname(p) or None)  # noqa: S603
+            return {"ok": True, "launched": " ".join(cmd)}
         except Exception as e:  # noqa: BLE001
             return {"ok": False, "error": str(e)[:120]}
 
