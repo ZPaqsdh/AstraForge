@@ -127,7 +127,7 @@ class FusionModule:
             except Exception:
                 pass
         if not info["name"] and not info["cuda"]:
-            info["note"] = "未检测到 NVIDIA 显卡（AMD/Intel 暂走 CPU 多核）"
+            info["note"] = "无 CUDA 环境（未装 cuPy / nvidia-smi 不可用），融合走 CPU 多核"
         elif info["cuda"] and not info["name"]:
             info["name"] = "CUDA 环境可用（cuPy）"
         _GPU_CACHE = dict(info)

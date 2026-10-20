@@ -523,19 +523,25 @@
 
 .af-toast { position: fixed; left: 50%; bottom: 28px; transform: translateX(-50%); z-index: 1600; background: var(--panel); color: var(--fg); border: 1px solid var(--border-strong); border-radius: 8px; padding: 8px 16px; font-size: 12px; box-shadow: 0 10px 30px rgba(0,0,0,.25); max-width: 70vw; text-align: center; }
 
-/* v0.3.6 居中胶囊：比 toast 大得多，弹在屏幕正中，不可能看不见 */
+/* v0.3.6 居中胶囊：融入 app 暗色设计语言（panel 底 + 细边框 + 左侧色条），不搞大绿坨 */
 .af-capsule {
   position: fixed; left: 50%; top: 38%; transform: translate(-50%, -50%);
   z-index: 1800; display: flex; align-items: center; gap: 10px;
-  background: var(--ok, #2d7a4f); color: #fff;
-  border-radius: 999px; padding: 16px 32px;
-  font-size: 17px; font-weight: 600;
-  box-shadow: 0 12px 48px rgba(0,0,0,.35);
-  animation: capsule-pop .22s cubic-bezier(.34,1.3,.64,1);
-  pointer-events: none; max-width: 72vw; text-align: center;
-  border: none;
+  background: var(--panel, #1f1f1f); color: var(--fg, #e8e8e8);
+  border: 1px solid var(--border-strong, #3c3c3c); border-radius: var(--radius, 9px);
+  padding: 13px 22px 13px 18px;
+  font-size: 13.5px; font-weight: 500;
+  box-shadow: 0 16px 48px rgba(0,0,0,.5);
+  animation: capsule-pop .2s cubic-bezier(.34,1.2,.64,1);
+  pointer-events: none; max-width: 72vw; text-align: left;
 }
-.af-capsule.bad { background: var(--err, #c0392b); }
+.af-capsule::before {
+  content: ''; width: 3px; height: 22px; border-radius: 2px;
+  background: var(--ok, #6ccb5f); flex-shrink: 0;
+}
+.af-capsule.bad::before { background: var(--err, #f14c4c); }
+.af-capsule svg { color: var(--ok, #6ccb5f); flex-shrink: 0; }
+.af-capsule.bad svg { color: var(--err, #f14c4c); }
 @keyframes capsule-pop {
   0% { opacity: 0; transform: translate(-50%, -50%) scale(.72); }
   100% { opacity: 1; transform: translate(-50%, -50%) scale(1); }
@@ -637,10 +643,12 @@
 .af-measure-result { font-size: 11.5px; color: var(--fg); font-family: Consolas, monospace; min-height: 18px; margin-bottom: 7px; }
 
 /* ---------- v0.3.4：反馈就地状态 / 邮箱弹窗 / 更新推送 ---------- */
-/* v0.3.6：按钮复制成功态做成 GitHub 风——实心绿底白字 + 对勾，一眼看出来 */
+/* v0.3.6：复制成功态——用 accent 蓝而非大绿块，融入暗色主题 */
 .af-btn.ok, .af-btn.ok:hover {
-  color: #fff !important; border-color: var(--ok) !important;
-  background: var(--ok) !important; font-weight: 600;
+  color: var(--accent, #4f9cf9) !important;
+  border-color: color-mix(in srgb, var(--accent, #4f9cf9) 50%, transparent) !important;
+  background: color-mix(in srgb, var(--accent, #4f9cf9) 14%, transparent) !important;
+  font-weight: 600;
 }
 .af-mail-addr {
   margin: 4px 0 10px; padding: 12px 14px; border: 1px dashed var(--border-strong);

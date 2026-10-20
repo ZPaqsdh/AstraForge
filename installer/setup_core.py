@@ -465,8 +465,9 @@ def _reg_write(sb: Sandbox, install_dir: str, version: str, size_kb: int, uninst
             'InstallLocation': install_dir,
             'DisplayIcon': str(Path(install_dir) / '_internal' / 'icon.ico') if
             (Path(install_dir) / '_internal' / 'icon.ico').exists() else exe,
-            'UninstallString': f'"{uninst}" --uninstall',
-            'QuietUninstallString': f'"{uninst}" --uninstall --silent',
+            # --dir 显式带上安装目录：注册表被清/目录被挪也能定位（定位链第①腿）
+            'UninstallString': f'"{uninst}" --uninstall --dir "{install_dir}"',
+            'QuietUninstallString': f'"{uninst}" --uninstall --silent --dir "{install_dir}"',
             'InstallDate': time.strftime('%Y%m%d'),
             'EstimatedSize': int(size_kb),
             'NoModify': 1, 'NoRepair': 1,
@@ -946,10 +947,24 @@ def _rollback(created: list[str], target: Path):
 
 
 # ---------------------------------------------------------------- 卸载
-def stop_running():
-    """停掉正在运行的主程序（避免占用文件）。"""
-    if not IS_WIN:
+def stop_running(grace_s: float = 10.0):
+    """停掉正在运行的主程序（避免占用文件）。
+
+    先温和请求退出（taskkill 不带 /F = 发 WM_CLOSE），等最多 grace_s 秒；
+    仍在运行才强杀——正在扫描没保存就丢了（2026-10-20 拍板）。
+    """
+    if not IS_WIN or not is_app_running():
         return
+    for exe in (APP_EXE, 'AstraForge.exe'):
+        try:
+            subprocess.run(['taskkill', '/IM', exe], capture_output=True, timeout=8)
+        except Exception:
+            pass
+    t0 = time.time()
+    while time.time() - t0 < grace_s:
+        if not is_app_running():
+            return
+        time.sleep(0.5)
     for exe in (APP_EXE, 'AstraForge.exe'):
         try:
             subprocess.run(['taskkill', '/IM', exe, '/F'], capture_output=True, timeout=8)
@@ -957,8 +972,85 @@ def stop_running():
             pass
 
 
-def uninstall(install_dir: str, keep_data: bool = True, cb=None, sb: Sandbox | None = None) -> dict:
-    """卸载：删程序文件 + 快捷方式 + 启动项 + 注册项。keep_data=False 时连数据一起删。"""
+# ---------------------------------------------------------------- 驱动卸载（卸载器勾选用）
+def list_oem_drivers() -> list[dict]:
+    """pnputil /enum-drivers → 全部已发布驱动包（发布名/原始名/提供程序）。"""
+    if not IS_WIN:
+        return []
+    try:
+        r = subprocess.run(['pnputil', '/enum-drivers'], capture_output=True, timeout=25,
+                           creationflags=0x08000000)
+        out = (r.stdout or b'').decode('gbk', errors='replace')
+    except Exception:
+        return []
+    drivers, cur = [], {}
+
+    def _flush():
+        if cur.get('oem_name'):
+            drivers.append(dict(cur))
+
+    for line in out.splitlines():
+        s = line.strip()
+        low = s.lower()
+        if ('发布名称' in s) or low.startswith('published name'):
+            _flush()
+            cur = {'oem_name': s.split(':', 1)[-1].strip()}
+        elif ('原始名称' in s) or low.startswith('original name'):
+            cur['orig_name'] = s.split(':', 1)[-1].strip()
+        elif ('提供程序名称' in s) or low.startswith('provider name'):
+            cur['provider'] = s.split(':', 1)[-1].strip()
+    _flush()
+    return drivers
+
+
+def uninstall_drivers() -> dict:
+    """卸载 Orbbec/Astra 相机驱动（pnputil /delete-driver /uninstall /force）。
+
+    非管理员自动提权（UAC 弹窗）；提权后无法可靠拿退出码，如实标注"已请求"。
+    """
+    hits = [d for d in list_oem_drivers()
+            if any(k in json.dumps(d, ensure_ascii=False).lower()
+                   for k in ('orbbec', 'astra'))]
+    if not hits:
+        return {'ok': True, 'removed': [], 'msg': '未找到 Orbbec/Astra 驱动包（可能未安装）'}
+    removed, errs = [], []
+    for d in hits:
+        oem = str(d.get('oem_name') or '')
+        if not oem.lower().endswith('.inf'):
+            continue
+        if is_admin():
+            try:
+                r = subprocess.run(['pnputil', '/delete-driver', oem, '/uninstall', '/force'],
+                                   capture_output=True, timeout=60, creationflags=0x08000000)
+                (removed if r.returncode == 0 else errs).append(oem)
+            except Exception:
+                errs.append(oem)
+        else:
+            ps = ("Start-Process -FilePath pnputil.exe -ArgumentList "
+                  f"'/delete-driver','\"{oem}\"','/uninstall','/force' "
+                  "-Verb RunAs -Wait -WindowStyle Hidden")
+            try:
+                subprocess.run(['powershell', '-NoProfile', '-NonInteractive', '-Command', ps],
+                               capture_output=True, timeout=90, creationflags=0x08000000)
+                removed.append(oem + '（已请求管理员执行）')
+            except Exception:
+                errs.append(oem)
+    if removed:
+        return {'ok': True, 'removed': removed, 'errors': errs,
+                'msg': '驱动已卸载：' + '、'.join(removed)}
+    return {'ok': False, 'removed': [], 'errors': errs, 'msg': '驱动卸载失败：' + '、'.join(errs)}
+
+
+def uninstall(install_dir: str, keep_data: bool = True, cb=None,
+              sb: Sandbox | None = None, remove_driver: bool = False) -> dict:
+    """卸载：删程序文件 + 快捷方式 + 启动项 + 注册项。keep_data=False 时连数据一起删。
+
+    保留（keep_data=True，2026-10-20 拍板/修 BUG）：
+    - 扫描输出/（顶层用户数据）
+    - code/data/（设置.json + 标定.json）——旧名单写顶层 data/ 是错的，实际在 code/data/，
+      删 code/ 时会连锅端，「保留设置」是空头支票。现在 code/ 只删 data/ 以外的内容。
+    logs/ 会话日志随软件删（拍板）。
+    """
     sb = sb or Sandbox()
     cb = cb or (lambda p, s: None)
     target = Path(install_dir)
@@ -971,11 +1063,12 @@ def uninstall(install_dir: str, keep_data: bool = True, cb=None, sb: Sandbox | N
     stop_running()
     time.sleep(0.4)
 
-    cb(20, '正在移除快捷方式与启动项…')
+    cb(18, '正在移除快捷方式与启动项…')
     _remove_shortcuts(sb)
 
-    cb(35, '正在删除程序文件…')
-    keep = {'扫描输出', 'data'}
+    cb(32, '正在删除程序文件…')
+    keep = {'扫描输出', 'data'}          # 顶层保留名
+    kept: list[str] = []
     removed_bytes = 0
     self_path = Path(sys.executable).resolve()
     # 运行中的卸载器 exe / 它被锁住的运行时目录（_setup_internal）删不干净 →
@@ -988,30 +1081,61 @@ def uninstall(install_dir: str, keep_data: bool = True, cb=None, sb: Sandbox | N
             mp = Path(mp).resolve()
             if mp.parent == target and mp != self_path.parent and mp.is_dir():
                 cleanup_paths.append(str(mp))
+
+    def _del_dir(d: Path):
+        """删目录；keep_data 时 code/data（设置+标定）整体保留。"""
+        if keep_data and d.name == 'code' and (d / 'data').is_dir():
+            for sub in d.iterdir():
+                if sub.name == 'data':
+                    continue
+                if sub.is_dir():
+                    shutil.rmtree(sub, ignore_errors=True)
+                else:
+                    try:
+                        removed_bytes_local = sub.stat().st_size
+                        sub.unlink()
+                    except Exception:
+                        pass
+            kept.append('code/data（设置与标定）')
+            return
+        shutil.rmtree(d, ignore_errors=True)   # 被锁文件删不掉，由 cleanup 兜底
+
     for item in sorted(target.iterdir(), key=lambda p: (p.is_dir(), p.name)):
         try:
             if item.resolve() == self_path:
                 continue                     # 自己（卸载器）留到退出后删
             if keep_data and item.name in keep:
+                kept.append(item.name)
                 continue
             if item.is_dir():
-                shutil.rmtree(item, ignore_errors=True)   # 运行时目录里被锁的文件删不掉，由 cleanup 兜底
+                _del_dir(item)
             else:
                 removed_bytes += item.stat().st_size
                 item.unlink()
         except Exception:
             pass
 
-    cb(75, '正在清理注册信息…')
+    cb(62, '正在清理注册信息…')
     _reg_delete(sb)
 
-    cb(90, '正在收尾…')
+    cb(72, '正在收尾…')
     if not keep_data:
         for n in keep:
             shutil.rmtree(target / n, ignore_errors=True)
+        kept = []
+    else:
+        # code/data 没走到 keep 分支也要报保留（目录本身可能不存在，如实）
+        if not any('code/data' in k for k in kept) and (target / 'code' / 'data').exists():
+            kept.append('code/data（设置与标定）')
+
+    drv = {'ok': True, 'msg': '未勾选卸载驱动', 'removed': []}
+    if remove_driver:
+        cb(84, '正在卸载相机驱动…')
+        drv = uninstall_drivers()
 
     cb(100, '卸载完成')
     return {'ok': True, 'msg': '卸载完成', 'dir': str(target),
+            'kept': kept, 'driver': drv,
             'cleanup_paths': cleanup_paths}
 
 

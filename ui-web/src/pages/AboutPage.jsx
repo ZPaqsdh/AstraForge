@@ -22,39 +22,66 @@ const UPDATE_LOG = [
 const GH = 'https://github.com/ZPaqsdh/AstraForge'
 
 async function copyText(text) {
+  // 桌面端（Qt WebEngine）navigator.clipboard 会"假成功"——表面 resolved 实际没写系统剪贴板。
+  // 所以**后端 Windows API 是主力**，浏览器 API 只做兜底。
+  try {
+    const r = await api.clipboardSet(text)
+    if (r && r.ok) return true
+  } catch (e) { /* 兜底 */ }
+
   try {
     await navigator.clipboard.writeText(text)
     return true
+  } catch (e) { /* 兜底 */ }
+
+  try {
+    const ta = document.createElement('textarea')
+    ta.value = text
+    ta.style.position = 'fixed'
+    ta.style.opacity = '0'
+    document.body.appendChild(ta)
+    ta.select()
+    const ok = document.execCommand('copy')
+    document.body.removeChild(ta)
+    return !!ok
   } catch (e) {
-    try {
-      const ta = document.createElement('textarea')
-      ta.value = text
-      ta.style.position = 'fixed'
-      ta.style.opacity = '0'
-      document.body.appendChild(ta)
-      ta.select()
-      document.execCommand('copy')
-      document.body.removeChild(ta)
-      return true
-    } catch (err) {
-      return false
-    }
+    return false
   }
 }
 
 function fmtDiag(d) {
   if (!d) return ''
   const dev = d.device || {}
+  const cpu = d.cpu || {}
+  const ram = d.ram || {}
+  const g = d.gpu || {}
+  const fps = d.fps || {}
+  const mem = (ram.total_gb != null)
+    ? `${ram.total_gb} GB（可用 ${ram.avail_gb ?? '?'} GB）` : '未取到'
+  const gpuLine = (d.gpus && d.gpus.length)
+    ? d.gpus.join(' / ')
+    : '未取到显示适配器'
+  const compute = g.cuda
+    ? `CUDA 可用${g.name ? `（${g.name}）` : ''}`
+    : (g.name ? `CPU 多核（检测到 ${g.name}，未启用 CUDA）` : 'CPU 多核（无 CUDA 环境）')
+  const modLine = Object.entries(d.modules || {})
+    .map(([k, v]) => `${k} ${v}`).join(' / ') || '—'
   return [
-    `AstraForge v${d.version || '?'}`,
-    `OS：${d.os || '?'} · Python ${d.python || '?'} · ${d.cpu_cores || '?'} 核`,
+    `【AstraForge 诊断报告】`,
+    `时间：${d.ts || '?'}`,
+    `版本：v${d.version || '?'} · ${d.install_mode === 'installed' ? '安装版' : '开发版'}`,
+    `系统：${d.os || '?'} · ${d.arch || ''} · Python ${d.python || '?'}`,
+    `CPU：${cpu.model || '?'} · ${cpu.cores || d.cpu_cores || '?'} 核`,
+    `内存：${mem}`,
+    `显卡：${gpuLine}`,
+    `融合加速：${compute}`,
+    `模块（${Object.keys(d.modules || {}).length}）：${modLine}`,
     `设备：${dev.connected ? '已连接' : '未连接'}${dev.streaming ? ' · 流中' : ''}` +
       ` · 补偿 ${dev.padded || 0} / 拒帧 ${dev.rejected || 0}`,
-    `GPU：${d.gpu?.name || '未检测到 NVIDIA'}`,
-    `模块：${Object.entries(d.modules || {}).map(([k, v]) => `${k} ${v}`).join(' / ') || '—'}`,
-    `日志：`,
-    ...(d.logs || []).slice(-10),
-    `时间：${d.ts || ''}`,
+    `帧率：深度 ${fps.depth ?? 0} / RGB ${fps.rgb ?? 0} · 累计帧 ${fps.rgb_frames ?? 0}`,
+    `最近日志：`,
+    ...(d.logs && d.logs.length ? d.logs.slice(-15) : ['（暂无日志）']),
+    `完整日志：${d.log_file || 'logs/（软件同目录，保留最近 20 个会话）'}`,
   ].join('\n')
 }
 
@@ -162,7 +189,7 @@ function MailDialog({ diag, onClose, showToast }) {
   return (
     <Modal title="邮箱反馈" onClose={onClose} width={540}>
       <p className="af-section-copy">
-        把问题发到这个邮箱即可。建议带上诊断信息（版本 / 系统 / 设备 / 最近日志），定位会快很多。
+        把问题发到这个邮箱即可。建议带上诊断信息（系统硬件 / 版本 / 设备 / 模块 / 最近日志），定位会快很多。
       </p>
       <div className="af-mail-addr" title="选中后可 Ctrl+C">{MAIL}</div>
       <div className="af-row wrap">
@@ -364,7 +391,6 @@ export default function AboutPage({ app }) {
   const [diag, setDiag] = useState(null)
   const [feedbackOpen, setFeedbackOpen] = useState(false)
   const [mailOpen, setMailOpen] = useState(false)
-  const [uninstallHelp, setUninstallHelp] = useState(false)
   const [uninstallDrvConfirm, setUninstallDrvConfirm] = useState(false)
   const [fb, setFb] = useState({ type: 'Bug', title: '', body: '', withDiag: true })
 
@@ -606,6 +632,7 @@ export default function AboutPage({ app }) {
               </div>
             </div>
 
+            {/* 按正常使用习惯排序：常用在前，破坏性操作（卸载驱动）压最后。不放「卸载软件」——卸载是独立程序 */}
             <div className="af-row wrap">
               <Btn small icon={RefreshCw} onClick={() => refreshDriver(true)} disabled={scanning}>
                 {scanning ? '检测中…' : '重新检测'}
@@ -622,32 +649,15 @@ export default function AboutPage({ app }) {
                 onClick={() => guard(blockers.pack, openDriverFolder)}>
                 驱动文件夹
               </Btn>
-              <Btn small danger icon={Trash2} disabled={installing}
-                onClick={() => setUninstallDrvConfirm(true)}>
-                卸载驱动
-              </Btn>
               <Btn small icon={Cpu} onClick={() => guard(blockers.device, resetUsb)}>
                 USB 复位
               </Btn>
-              <Btn small icon={FolderOpen} onClick={() => openExe(paths?.root, '程序目录')}>程序目录</Btn>
-              <Btn small danger icon={Trash2}
-                onClick={async () => {
-                  if (paths?.uninstaller) {
-                    try {
-                      // 便携版无注册表 → 必须传 --dir，否则卸载器报「未找到安装目录」
-                      const dirArg = paths.install_root || paths.root || ''
-                      const r = await api.launchExe(paths.uninstaller,
-                        dirArg ? `--dir "${dirArg}"` : '')
-                      if (r && r.ok === false) throw new Error(r.error)
-                      showToast('已启动卸载器，请按向导操作')
-                    } catch (e) {
-                      showToast(`✗ ${e.message || e}`)
-                    }
-                  } else {
-                    setUninstallHelp(true)
-                  }
-                }}>
-                卸载
+              <Btn small icon={FolderOpen} onClick={() => openExe(paths?.root, '程序目录')}>
+                程序目录
+              </Btn>
+              <Btn small danger icon={Trash2} disabled={installing}
+                onClick={() => setUninstallDrvConfirm(true)}>
+                卸载驱动
               </Btn>
             </div>
             {/* BUG-025：不可用的原因必须写在脸上，不能只留一片灰按钮 */}
@@ -670,7 +680,7 @@ export default function AboutPage({ app }) {
           <Section title="反馈与诊断" aside={<Bug size={15} />}>
             <p className="af-section-copy">
               反馈可走 GitHub Issue（自动预填）或邮箱（{MAIL}）。两种方式都可以附带诊断信息
-              （版本 / 系统 / 设备 / 模块 / 最近日志），提交前可自行检查。
+              （系统硬件 / 版本 / 设备 / 模块 / 最近日志），提交前可自行检查。
             </p>
             <div className="af-feedback-actions">
               <Btn primary icon={Send} onClick={() => {
@@ -678,6 +688,15 @@ export default function AboutPage({ app }) {
                 showToast('已打开反馈窗口：填标题后点「生成 Issue 草稿」', 3500)
               }}>反馈问题</Btn>
               <CopyBtn text={() => fmtDiag(diag)} label="复制诊断" showToast={showToast} />
+              <Btn icon={FolderOpen} onClick={async () => {
+                try {
+                  const r = await api.logOpen()
+                  if (r && r.ok === false) throw new Error(r.error || '无法打开')
+                  showToast(`已打开日志目录：${r.path || 'logs/'}`, 4000)
+                } catch (e) {
+                  showToast(`✗ ${e.message || e}`, 4500)
+                }
+              }}>日志目录</Btn>
               <Btn icon={Mail} onClick={() => {
                 setMailOpen(true)
                 showToast(`已打开邮箱反馈窗口：${MAIL}`, 3500)
@@ -692,7 +711,7 @@ export default function AboutPage({ app }) {
                 }
               }}>GitHub Issue</Btn>
             </div>
-            <div className="af-hint">诊断只包含版本、系统、设备状态、模块版本与最近日志；不含序列号。提交前可在预览里检查并删改。</div>
+            <div className="af-hint">诊断只包含系统硬件（CPU/内存/显卡）、版本、设备状态、模块版本与最近日志；不含序列号。提交前可在预览里检查并删改。运行日志在软件同目录 logs/（一次开→关一个文件，全程带日期时间，保留最近 20 个会话），点「日志目录」可直接打开。</div>
           </Section>
         </div>
 
@@ -721,33 +740,6 @@ export default function AboutPage({ app }) {
 
       {mailOpen ? (
         <MailDialog diag={diag} showToast={showToast} onClose={() => setMailOpen(false)} />
-      ) : null}
-
-      {uninstallHelp ? (
-        <Modal title="卸载 AstraForge" onClose={() => setUninstallHelp(false)} width={520}>
-          <p className="af-section-copy">
-            {paths?.installed === false
-              ? '当前是便携版（免安装），没有卸载器。'
-              : '未找到卸载器程序（可能已被删除或在非标准目录）。'}
-          </p>
-          <div className="af-block-item" style={{ marginBottom: 12 }}>
-            <b>便携版卸载方法</b>：直接删除软件文件夹即可。<br />
-            路径：<code style={{ userSelect: 'all' }}>{paths?.root || '（未知）'}</code>
-          </div>
-          <div className="af-block-item" style={{ marginBottom: 12 }}>
-            <b>已安装版</b>：请用 Windows「设置 → 应用」里搜 AstraForge 卸载，
-            或在安装目录找 <code>AstraForge-卸载.exe</code>。
-          </div>
-          <div className="af-hint">
-            数据目录（设置 / 标定 / 扫描输出）不会被自动删除：
-            <code style={{ userSelect: 'all' }}>{paths?.data || ''}</code>
-            ；导出目录：<code style={{ userSelect: 'all' }}>{paths?.export || ''}</code>
-          </div>
-          <div className="af-modal-actions">
-            <Btn icon={FolderOpen} onClick={() => openExe(paths?.root, '软件目录')}>打开软件目录</Btn>
-            <Btn primary onClick={() => setUninstallHelp(false)}>知道了</Btn>
-          </div>
-        </Modal>
       ) : null}
 
       {uninstallDrvConfirm ? (
@@ -793,7 +785,7 @@ export default function AboutPage({ app }) {
           <label className="af-check">
             <input type="checkbox" checked={fb.withDiag}
               onChange={(e) => setFb({ ...fb, withDiag: e.target.checked })} />
-            <span>附带诊断信息（版本 / 设备 / 模块 / 最近日志）</span>
+            <span>附带诊断信息（系统硬件 / 设备 / 模块 / 最近日志）</span>
           </label>
           <details className="af-diag-preview">
             <summary>预览诊断信息</summary>

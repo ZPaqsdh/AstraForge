@@ -184,7 +184,9 @@ def main():
     link = getattr(dev, "link", None)
     check("ir_off 已执行", link is None or not link.stream_on)
     logs = shell.Bridge._logs
-    off_logs = [m for m, ok in logs if "关激光" in str(m) or "停流" in str(m)]
+    # 兼容 2 元组 (m, ok) 与 3 元组 (ts, m, ok)：消息固定在倒数第 2 位
+    off_logs = [e[-2] for e in logs
+                if "关激光" in str(e[-2]) or "停流" in str(e[-2])]
     check("关红外日志", len(off_logs) >= 2, str(off_logs[:2]))
 
     print("\n" + "=" * 60)

@@ -75,7 +75,7 @@ export default function App() {
     let alive = true
     const tick = async () => {
       try {
-        const r = await api.logs(20)
+        const r = await api.logs(50)
         if (alive) setLogs(r.logs || [])
       } catch (e) {}
     }

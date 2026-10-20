@@ -21,6 +21,7 @@ import sys
 import tempfile
 import threading
 import time
+import traceback
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
@@ -33,6 +34,162 @@ APP_VERSION = "0.3.6"
 # 测试可用 AF_UPDATE_URL 覆盖）。update.json 由 Release 的 latest/download 恒定入口提供。
 UPDATE_URL = (os.environ.get("AF_UPDATE_URL", "").strip()
               or "https://github.com/ZPaqsdh/AstraForge/releases/latest/download/update.json")
+
+
+def _sys_info():
+    """CPU / 内存 / 显示适配器（纯 ctypes + 注册表；不走 PowerShell——
+    本机 Get-CimInstance 常静默返回空且退出码 0）。"""
+    import platform
+    info = {"cpu_model": "?", "cores": os.cpu_count() or 0,
+            "arch": platform.machine(),
+            "ram_total_gb": None, "ram_avail_gb": None, "gpus": []}
+    try:
+        import winreg
+        k = winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE,
+                           r"HARDWARE\DESCRIPTION\System\CentralProcessor\0")
+        v, _ = winreg.QueryValueEx(k, "ProcessorNameString")
+        winreg.CloseKey(k)
+        info["cpu_model"] = " ".join(str(v).split())
+    except Exception:
+        info["cpu_model"] = platform.processor() or platform.machine() or "?"
+    try:
+        import ctypes
+        from ctypes import wintypes
+
+        class _MEMORYSTATUSEX(ctypes.Structure):
+            _fields_ = [("dwLength", wintypes.DWORD), ("dwMemoryLoad", wintypes.DWORD),
+                        ("ullTotalPhys", ctypes.c_ulonglong),
+                        ("ullAvailPhys", ctypes.c_ulonglong),
+                        ("ullTotalPageFile", ctypes.c_ulonglong),
+                        ("ullAvailPageFile", ctypes.c_ulonglong),
+                        ("ullTotalVirtual", ctypes.c_ulonglong),
+                        ("ullAvailVirtual", ctypes.c_ulonglong),
+                        ("ullAvailExtendedVirtual", ctypes.c_ulonglong)]
+        ms = _MEMORYSTATUSEX()
+        ms.dwLength = ctypes.sizeof(_MEMORYSTATUSEX)
+        if ctypes.windll.kernel32.GlobalMemoryStatusEx(ctypes.byref(ms)):
+            info["ram_total_gb"] = round(ms.ullTotalPhys / 1024 ** 3, 1)
+            info["ram_avail_gb"] = round(ms.ullAvailPhys / 1024 ** 3, 1)
+    except Exception:
+        pass
+    try:
+        import ctypes
+        from ctypes import wintypes
+
+        class _DISPLAY_DEVICEW(ctypes.Structure):
+            _fields_ = [("cb", wintypes.DWORD), ("DeviceName", wintypes.WCHAR * 32),
+                        ("DeviceString", wintypes.WCHAR * 128),
+                        ("StateFlags", wintypes.DWORD),
+                        ("DeviceID", wintypes.WCHAR * 128),
+                        ("DeviceKey", wintypes.WCHAR * 128)]
+        i, seen = 0, set()
+        while i < 16:
+            dd = _DISPLAY_DEVICEW()
+            dd.cb = ctypes.sizeof(_DISPLAY_DEVICEW)
+            if not ctypes.windll.user32.EnumDisplayDevicesW(None, i, ctypes.byref(dd), 0):
+                break
+            name = dd.DeviceString.strip()
+            if name and name not in seen:
+                seen.add(name)
+                info["gpus"].append(name)
+            i += 1
+    except Exception:
+        pass
+    return info
+
+
+def _modules_on_disk():
+    """磁盘 modules/*/module.json 版本清单（--no-pipeline 也有内容）。"""
+    mods = {}
+    try:
+        for md in sorted((ROOT / "modules").glob("*/module.json")):
+            try:
+                meta = json.loads(md.read_text(encoding="utf-8"))
+                mods[meta.get("name", md.parent.name)] = meta.get("version", "?")
+            except Exception:
+                continue
+    except Exception:
+        pass
+    return mods
+
+
+def _tail_log_file(n=15):
+    """读当前会话日志末尾 n 行。"""
+    try:
+        p = _RUNLOG_FILE or RUN_LOG_FALLBACK
+        if not p or not p.exists():
+            return []
+        lines = p.read_text(encoding="utf-8", errors="replace").splitlines()
+        return [ln for ln in lines[-n:] if ln.strip()]
+    except Exception:
+        return []
+
+
+# ---------- 运行日志（一次开→关 = 一个会话文件）----------
+# 落盘位置 = 软件同目录 logs/（安装版=AstraForge.exe 旁；开发版=shell.py 旁）。
+# 文件名按会话开始时间：AstraForge_20261020_172500.log
+# 内容 = 全程：几点开始运行 → 加载了什么/什么加载失败 → 每个操作 → 关闭（含时长）
+# 每行都带日期时间；只保留最近 20 个会话文件（更旧自动删）。
+APP_HOME = ROOT.parent if (ROOT.parent / "AstraForge.exe").exists() else ROOT
+LOG_DIR = APP_HOME / "logs"
+SESSION_KEEP = 20
+_RUNLOG_LOCK = threading.Lock()
+_RUNLOG_FILE = None          # 会话开始时定；未定则懒建
+_RUNLOG_START = [0.0]
+RUN_LOG_FALLBACK = LOG_DIR / "AstraForge_pending.log"
+_POLL_APIS = {"ping", "heartbeat", "state", "logs", "update_state",
+              "device_scan", "quality", "frame"}
+
+
+def _runlog(msg, level="INFO"):
+    """写一行运行日志（每行带日期时间）。绝不出错打扰主流程。"""
+    try:
+        with _RUNLOG_LOCK:
+            global _RUNLOG_FILE
+            LOG_DIR.mkdir(parents=True, exist_ok=True)
+            if _RUNLOG_FILE is None:
+                _RUNLOG_FILE = LOG_DIR / (
+                    f"AstraForge_{time.strftime('%Y%m%d_%H%M%S')}.log")
+                _RUNLOG_START[0] = time.time()
+            with open(_RUNLOG_FILE, "a", encoding="utf-8") as f:
+                f.write(f"{time.strftime('%Y-%m-%d %H:%M:%S')} [{level}] {msg}\n")
+    except Exception:
+        pass
+
+
+def _runlog_prune():
+    """只保留最近 SESSION_KEEP 个会话文件，更旧自动删。"""
+    try:
+        files = sorted(LOG_DIR.glob("AstraForge_*.log"),
+                       key=lambda p: p.stat().st_mtime, reverse=True)
+        for old in files[SESSION_KEEP:]:
+            try:
+                old.unlink()
+            except Exception:
+                pass
+    except Exception:
+        pass
+
+
+def _runlog_session_start(args_desc=""):
+    global _RUNLOG_FILE
+    try:
+        LOG_DIR.mkdir(parents=True, exist_ok=True)
+        _RUNLOG_FILE = LOG_DIR / f"AstraForge_{time.strftime('%Y%m%d_%H%M%S')}.log"
+        _RUNLOG_START[0] = time.time()
+        _runlog_prune()
+    except Exception:
+        _RUNLOG_FILE = None
+    _runlog(f"===== 会话开始 AstraForge v{APP_VERSION}"
+            f"（pid={os.getpid()}，{args_desc or '默认参数'}）=====")
+
+
+def _runlog_session_end(reason="正常退出"):
+    dur = int(time.time() - _RUNLOG_START[0]) if _RUNLOG_START[0] else 0
+    m, s = divmod(dur, 60)
+    h, m = divmod(m, 60)
+    _runlog(f"===== 会话结束（{reason}，本次运行时长 "
+            f"{h}:{m:02d}:{s:02d}）=====")
 
 # QtWebEngine flags（必须在 Qt 初始化前设置）：
 #   --no-sandbox    ：QtWebEngineProcess 子进程在受限环境必需（否则 loadFinished=False）
@@ -426,6 +583,23 @@ def run_qt_window(url: str, bridge, snap_path=None, snap_delay=8.0,
 
     app = QApplication.instance() or QApplication(_sys.argv[:1])
 
+    # 应用图标（标题栏/任务栏）：assets/icon.ico。
+    # 启动器 exe 的图标是 PyInstaller 烧进去的，但窗口图标必须运行时设置——
+    # 不设的话任务栏/标题栏是 Python/Qt 默认图标（BUG-029）。
+    _ico = None
+    try:
+        from PySide6.QtGui import QIcon
+        _ico_p = ROOT / "assets" / "icon.ico"
+        if _ico_p.exists():
+            _ico = QIcon(str(_ico_p))
+            if _ico.isNull():
+                _ico = None
+            else:
+                app.setWindowIcon(_ico)
+                print(f"[shell] 窗口图标: {_ico_p}", flush=True)
+    except Exception as e:
+        print(f"[shell] 图标加载失败: {e}", flush=True)
+
     # 单实例锁：双开会抢 USB 设备/端口 —— 提示并退出（锁随进程结束自动释放）
     from PySide6.QtCore import QSharedMemory
     from PySide6.QtWidgets import QMessageBox
@@ -455,6 +629,7 @@ def run_qt_window(url: str, bridge, snap_path=None, snap_delay=8.0,
         def javaScriptConsoleMessage(self, level, message, line, src):
             msg = f"[web:{level.name}] {str(src).split('/')[-1]}:{line} {message}"
             print(msg, flush=True)
+            _runlog(msg, "WEB")
             try:
                 if web_log.exists() and web_log.stat().st_size > 1_000_000:
                     web_log.write_text("", encoding="utf-8")   # 轮转：超 1MB 清空
@@ -479,6 +654,8 @@ def run_qt_window(url: str, bridge, snap_path=None, snap_delay=8.0,
         pass
     win = MainWin()
     win.setWindowTitle("AstraForge 星铸")
+    if _ico is not None:
+        win.setWindowIcon(_ico)
     if size:
         # 显式尺寸（测试/排障用）：固定，不设最小限制
         try:
@@ -544,6 +721,7 @@ def _shutdown_and_exit(bridge, label="窗口已关闭"):
             print("[bridge] shutdown: 管线已收尾（红外已关）", flush=True)
     except Exception as e:
         print(f"[bridge] shutdown 收尾异常: {e}", flush=True)
+    _runlog_session_end(label)
     os._exit(0)
 
 
@@ -692,9 +870,26 @@ class Bridge:
         fn = getattr(self, "api_" + name.replace("/", "_"), None)
         if fn is None:
             raise KeyError(f"unknown api: {name}")
-        if method == "GET":
-            return fn(**{k: _num(v) for k, v in query.items()})
-        return fn(**(body or {}))
+        # 运行日志：记录用户操作（纯状态轮询跳过，避免噪音淹没操作）
+        key = name.replace("/", "_")
+        skip = key in _POLL_APIS
+        if key == "device_scan" and not str((query or {}).get("fast", (body or {}).get("fast", ""))).strip().lower() in ("1", "true", "yes", "on"):
+            skip = False          # 「重新检测」按钮的深查要记
+        if not skip:
+            try:
+                arg = body if method != "GET" else query
+                arg_s = json.dumps(arg, ensure_ascii=False)[:120] if arg else ""
+                _runlog(f"操作 {method} /api/{name} {arg_s}".strip(), "ACT")
+            except Exception:
+                _runlog(f"操作 {method} /api/{name}", "ACT")
+        try:
+            if method == "GET":
+                return fn(**{k: _num(v) for k, v in query.items()})
+            return fn(**(body or {}))
+        except Exception as e:
+            if not skip:
+                _runlog(f"操作失败 /api/{name}: {type(e).__name__}: {e}", "ERR")
+            raise
 
     # ---------- 状态 / 帧 ----------
     def api_ping(self, msg=""):
@@ -733,7 +928,19 @@ class Bridge:
         return st
 
     def api_logs(self, n=30, **kw):
-        return {"logs": [f"{'✓' if ok else '✗'} {m}" for m, ok in self._logs[-int(n):]]}
+        n = max(1, min(500, int(n)))
+        file_lines = _tail_log_file(n)
+        if file_lines:
+            return {"logs": file_lines, "file": str(_RUNLOG_FILE or RUN_LOG_FALLBACK)}
+        out = []
+        for e in self._logs[-n:]:
+            if len(e) == 3:
+                ts, m, ok = e
+                out.append(f"[{ts}] {'✓' if ok else '✗'} {m}")
+            else:
+                m, ok = e
+                out.append(f"{'✓' if ok else '✗'} {m}")
+        return {"logs": out, "file": str(_RUNLOG_FILE or RUN_LOG_FALLBACK)}
 
     def _no_frame_jpeg(self):
         dev = self._m("device")
@@ -1517,8 +1724,18 @@ class Bridge:
                 "driver_pack_ok": bool(driver_pack),
                 "driver_zadig_ok": bool(driver_tool),
                 "uninstaller": uninstaller,
-                "log": str(ROOT / "shell_web.log"),
+                "log": str(_RUNLOG_FILE or RUN_LOG_FALLBACK),
+                "log_web": str(ROOT / "shell_web.log"),
                 "python": sys.version.split()[0]}
+
+    def api_log_open(self, **kw):
+        """打开运行日志目录（软件同目录 logs/）。"""
+        try:
+            LOG_DIR.mkdir(parents=True, exist_ok=True)
+            os.startfile(str(LOG_DIR))
+            return {"ok": True, "path": str(LOG_DIR)}
+        except Exception as e:
+            return {"ok": False, "error": str(e)[:100], "path": str(LOG_DIR)}
 
     # ---------- 驱动库（随包 驱动工具/，程序内可修复/安装/支持新设备） ----------
     def api_driver_state(self, deep=0, **kw):
@@ -1640,6 +1857,33 @@ class Bridge:
         except Exception as e:  # noqa: BLE001
             return {"ok": False, "error": str(e)[:120]}
 
+    def api_clipboard_set(self, text="", **kw):
+        """真复制到系统剪贴板。用 PowerShell Set-Clipboard（ctypes handle 在 64 位会截断）。"""
+        if text is None:
+            text = ""
+        if not isinstance(text, str):
+            text = str(text)
+        try:
+            import subprocess
+            import base64
+            # 用 base64 传 UTF-16LE 避免引号/换行转义问题
+            b64 = base64.b64encode(text.encode("utf-16-le")).decode("ascii")
+            ps = (
+                f"$b=[Convert]::FromBase64String('{b64}');"
+                f"$t=[System.Text.Encoding]::Unicode.GetString($b);"
+                f"Set-Clipboard -Value $t"
+            )
+            r = subprocess.run(
+                ["powershell", "-NoProfile", "-NonInteractive", "-Command", ps],
+                capture_output=True, timeout=10,
+                creationflags=0x08000000)
+            if r.returncode == 0:
+                return {"ok": True, "chars": len(text)}
+            err = (r.stderr or b"").decode("utf-8", "replace")[:120]
+            return {"ok": False, "error": f"PowerShell 剪贴板失败: {err}"}
+        except Exception as e:  # noqa: BLE001
+            return {"ok": False, "error": f"剪贴板写入失败: {e}"[:120]}
+
     def api_artifact(self, path="", **kw):
         """读取导出目录内的产物图片（融合预览），只允许 png/jpg，防路径穿越。"""
         rec = self._m("recorder")
@@ -1669,25 +1913,54 @@ class Bridge:
                 "note": "For Orbbec Astra devices. Not affiliated with Orbbec."}
 
     def api_diag(self, **kw):
-        """诊断信息（反馈给 AI/开发者用）：系统 + 设备 + 模块 + 最近日志。"""
+        """诊断信息（反馈给 AI/开发者用）：系统硬件 + 设备 + 模块 + 最近日志。
+        定位问题靠它——CPU/内存/显卡/模块/日志缺一不可。"""
         import platform
         dev = self._m("device")
         link = getattr(dev, "link", None) if dev else None
+        sysinfo = _sys_info()
+        # 模块版本：优先管线实装；空则回退磁盘清单（--no-pipeline 也能报）
+        mods = self.pipeline.versions() if self.pipeline else {}
+        if not mods:
+            mods = _modules_on_disk()
+        gpu = None
+        fus = self._m("fusion")
+        if fus is not None:
+            try:
+                gpu = fus.detect_gpu()
+            except Exception:
+                gpu = None
+        # 日志：运行日志文件（全程，软件同目录 logs/）优先，回退内存事件
+        logs = _tail_log_file(15)
+        if not logs:
+            logs = [f"[{ts}] {'✓' if ok else '✗'} {m}" for ts, m, ok
+                    in ([(*e[:2], e[2]) if len(e) == 3 else ('', e[0], e[1])
+                         for e in self._logs[-15:]])]
+        if not logs:
+            logs = ["（暂无日志）"]
         return {"app": "AstraForge", "version": APP_VERSION,
+                "install_mode": "installed" if (ROOT.parent / "AstraForge.exe").exists() else "dev",
                 "os": f"{platform.system()} {platform.version()}",
+                "arch": sysinfo.get("arch", ""),
                 "python": platform.python_version(),
-                "cpu_cores": os.cpu_count(),
+                "cpu": {"model": sysinfo.get("cpu_model", "?"),
+                        "cores": sysinfo.get("cores", 0)},
+                "cpu_cores": sysinfo.get("cores", 0),     # 旧字段，前端兼容
+                "ram": {"total_gb": sysinfo.get("ram_total_gb"),
+                        "avail_gb": sysinfo.get("ram_avail_gb")},
+                "gpus": sysinfo.get("gpus", []),
                 "device": {"connected": link is not None,
                            "streaming": bool(link and link.stream_on),
                            "padded": getattr(link, "padded_frames", 0) if link else 0,
                            "rejected": getattr(link, "rejected", 0) if link else 0},
-                "modules": self.pipeline.versions() if self.pipeline else {},
-                "gpu": (self._m("fusion").detect_gpu() if self._m("fusion") else None),
+                "modules": mods,
+                "gpu": gpu,
                 "fps": {"depth": round(_fps_meter_stats["v"], 1),
                         "rgb": round(_fps_meter_rgb["v"], 1),
                         "rgb_frames": getattr(self._m("recorder"), "rgb_count", 0)
                         if self._m("recorder") else 0},
-                "logs": [f"{'✓' if ok else '✗'} {m}" for m, ok in self._logs[-15:]],
+                "logs": logs,
+                "log_file": str(_RUNLOG_FILE or RUN_LOG_FALLBACK),
                 "ts": time.strftime("%Y-%m-%d %H:%M:%S")}
 
     def api_report_ready(self, data=None, **kw):
@@ -1981,15 +2254,25 @@ def build_pipeline():
         except Exception:
             pass
 
+    # 模块日志 → 前端（经 /api/logs 轮询）+ 持久化 data/app.log（诊断/排查用）
+    # 订阅挂在 setup 之前——否则模块 setup 阶段的日志全部漏掉
+    logs = []
+
+    def _on_mod_log(t):
+        msg, ok = t[0], t[1]
+        ts = time.strftime("%m-%d %H:%M:%S")
+        logs.append((ts, msg, ok))
+        _runlog(msg, "OK" if ok else "ERR")
+
+    bus.subscribe("module.log", _on_mod_log)
+
     log_fn = lambda m, ok=True: bus.publish("module.log", (m, ok))
+    log_fn(f"AstraForge v{APP_VERSION} 管线装配中…")
     ctx = ModuleContext(bus=bus, device=None, settings=settings,
                         log=log_fn, data_dir=ROOT / "data", root_dir=ROOT,
                         ui_root=None)
     pipe.setup_all(ctx)
-
-    # 模块日志 → 前端（经 /api/logs 轮询）
-    logs = []
-    bus.subscribe("module.log", lambda t: logs.append(t))
+    log_fn(f"管线装配完成（{len(pipe.modules)} 个模块）")
 
     # RGB 状态文案跟踪
     rgb_status = ["未连接"]
@@ -2036,6 +2319,13 @@ def main():
     ap.add_argument("--serve-only", action="store_true",
                     help="只起本地 HTTP 服务、不开窗口（UI 开发/无设备预览用）")
     args = ap.parse_args()
+
+    # 运行日志：程序一启动就开始记，直到关闭（BUG-028 补全）
+    _runlog_session_start(
+        " ".join(a for a in sys.argv[1:]) or "默认参数")
+    sys.excepthook = lambda et, ev, tb: _runlog(
+        "未捕获异常:\n" + "".join(traceback.format_exception(et, ev, tb)),
+        "CRASH")
 
     dist = ROOT / "ui-web" / "dist"
     if not (dist / "index.html").exists():
